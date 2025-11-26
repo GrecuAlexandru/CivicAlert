@@ -1,0 +1,212 @@
+\documentclass[12pt, a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[romanian]{babel}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{array}
+\usepackage{enumitem}
+
+% Setarea marginilor
+\geometry{
+    a4paper,
+    total={170mm,257mm},
+    left=25mm,
+    top=25mm,
+}
+
+\title{\textbf{CivicAlert}\\
+\large Platformă Smart City pentru Managementul Sesizărilor Urbane}
+\author{
+    \textbf{Echipa:} GoSky \\
+    \textit{Membri:} \\
+    Alexandru Grecu \\
+    Andrei-Alexandru Girleanu
+}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+\tableofcontents
+\newpage
+
+\section{Definirea Temei}
+
+\subsection{Tema generală și obiectivele propuse}
+Proiectul propune dezvoltarea unei platforme web de tip \textit{Smart City}, destinată digitalizării interacțiunii dintre cetățeni și administrația locală. Aplicația permite cetățenilor să raporteze probleme de infrastructură urbană direct pe hartă, generând automat un \textbf{Tichet de Incident}.
+
+Platforma include un modul administrativ avansat, unde funcționarii publici pot gestiona ciclul de viață al tichetelor (validare, alocare, rezolvare) și pot vizualiza densitatea incidentelor prin hărți de tip \textbf{Heatmap}.
+
+\textbf{Obiective principale:}
+\begin{itemize}
+    \item Implementarea unui sistem de \textbf{Ticketing Geospațial}: transformarea oricărei sesizări într-un tichet cu status gestionabil.
+    \item Vizualizarea interactivă a problemelor pe hartă folosind \textbf{ArcGIS API}.
+    \item Analiză spațială prin vizualizare de tip \textbf{Heatmap} (Element Distinctiv).
+    \item Asigurarea transparenței decizionale (cetățeanul vede în timp real când tichetul său este aprobat sau respins).
+\end{itemize}
+
+\subsection{Studiu de piață}
+Aplicații similare identificate: \textit{SeeClickFix}, \textit{FixMyStreet}, aplicații locale ale primăriilor. Diferențiatorul soluției noastre constă în integrarea vizualizării avansate ArcGIS (Heatmap) și rapiditatea interfeței oferită de Next.js.
+
+\section{Structurarea Datelor}
+
+Fiind utilizată platforma \textbf{Firebase}, datele vor fi stocate într-o bază de date \textbf{NoSQL (Firestore)}, organizată în colecții și documente JSON-like. Această structură permite o scalabilitate rapidă și o structură flexibilă a tichetelor.
+
+\subsection{Modelul de Date (Colecții Firestore)}
+
+\subsubsection{Colecția: \texttt{users}}
+Stochează profilurile utilizatorilor.
+\begin{itemize}
+    \item \texttt{uid} (String): ID unic generat de Firebase Auth.
+    \item \texttt{email} (String): Email utilizator.
+    \item \texttt{role} (String): \textit{'citizen'} sau \textit{'admin'}.
+    \item \texttt{createdAt} (Timestamp).
+\end{itemize}
+
+\subsubsection{Colecția: \texttt{tickets}}
+Reprezintă sesizările transformate în tichete.
+\begin{itemize}
+    \item \texttt{id} (String): ID unic al tichetului.
+    \item \texttt{userId} (String): Referință către utilizatorul care a creat tichetul.
+    \item \texttt{category} (String): Ex: 'Gropi', 'Iluminat', 'Salubritate'.
+    \item \texttt{description} (String): Detaliile problemei.
+    \item \texttt{status} (String): 
+        \begin{itemize}
+            \item \textit{'pending'} (În așteptare aprobare)
+            \item \textit{'approved'} (Aprobat/În lucru - apare pe harta publică)
+            \item \textit{'rejected'} (Respins - ex: duplicat sau invalid)
+            \item \textit{'resolved'} (Rezolvat)
+        \end{itemize}
+    \item \texttt{location} (GeoPoint): Latitudine și Longitudine (compatibil ArcGIS).
+    \item \texttt{imageUrl} (String): Link către imaginea stocată în Firebase Storage.
+    \item \texttt{createdAt} (Timestamp).
+\end{itemize}
+
+\section{Arhitectura Generală a Aplicației}
+
+Aplicația este construită pe o arhitectură \textit{Serverless} modernă.
+
+\subsection{Schema Bloc}
+\begin{center}
+    \fbox{\parbox{0.9\textwidth}{
+        \centering
+        \vspace{1cm}
+        \textit{[Aici inserați diagrama schematică a arhitecturii: Next.js Client $\leftrightarrow$ Firebase Services $\leftrightarrow$ ArcGIS API]}
+        \vspace{1cm}
+    }}
+\end{center}
+
+\textbf{Componente:}
+\begin{enumerate}
+    \item \textbf{Frontend (Client):} Realizat în \textbf{Next.js} (React). Gestionează interfața, randarea hărții și logica formularelor.
+    \item \textbf{Backend-as-a-Service (BaaS):} \textbf{Firebase} gestionează:
+        \begin{itemize}
+            \item \textit{Authentication}: Gestionarea sesiunilor utilizatorilor.
+            \item \textit{Firestore}: Baza de date în timp real.
+            \item \textit{Storage}: Stocarea fotografiilor încărcate la tichete.
+        \end{itemize}
+    \item \textbf{GIS Service:} \textbf{ArcGIS Maps SDK for JavaScript}. Asigură randarea hărții (Basemap), afișarea tichetelor ca \textit{GraphicsLayer} și generarea \textit{HeatmapRenderer}.
+\end{enumerate}
+
+\section{Diagrama Cazurilor de Utilizare}
+
+\begin{center}
+    \fbox{\parbox{0.9\textwidth}{
+        \centering
+        \vspace{1cm}
+        \textit{[Aici inserați diagrama UML Use Case]}
+        \vspace{1cm}
+    }}
+\end{center}
+
+\subsection{Descrierea Fluxului de Tichete}
+\begin{itemize}
+    \item \textbf{Actor: Cetățean}
+        \begin{itemize}
+            \item Se autentifică.
+            \item Navighează pe hartă și identifică locația.
+            \item Completează formularul și creează un \textit{Tichet (Status: Pending)}.
+            \item Vizualizează lista propriilor tichete și evoluția lor.
+        \end{itemize}
+    \item \textbf{Actor: Administrator}
+        \begin{itemize}
+            \item Primește notificare/vede tichetele noi în Dashboard.
+            \item Validează tichetul:
+                \begin{itemize}
+                    \item \textbf{Aprobă} $\rightarrow$ Tichetul devine public pe hartă.
+                    \item \textbf{Respinge} $\rightarrow$ Tichetul este arhivat cu motivul respingerii.
+                \end{itemize}
+            \item Marchează tichetul ca \textbf{Rezolvat} după intervenție.
+            \item Activează vizualizarea \textbf{Heatmap} pentru analiză strategică.
+        \end{itemize}
+\end{itemize}
+
+\section{Tehnologii}
+
+\subsection{Generale}
+\begin{itemize}
+    \item \textbf{Framework Web:} Next.js (React framework) - pentru SSR și routing rapid.
+    \item \textbf{Limbaj:} TypeScript.
+    \item \textbf{Platformă Backend:} Google Firebase (Ecosistem complet).
+    \item \textbf{Platformă GIS:} ArcGIS Platform (ArcGIS Maps SDK for JavaScript).
+    \item \textbf{Stiluri:} Tailwind CSS.
+\end{itemize}
+
+\subsection{Specifice}
+Implementarea componentelor cheie se va realiza astfel:
+\begin{itemize}
+    \item \textbf{Harta:} Se va instanția obiectul \texttt{MapView} din modulul \texttt{@arcgis/core/views}.
+    \item \textbf{Feature Layer Tichete:} Datele din Firestore vor fi convertite în obiecte \texttt{Graphic} ArcGIS și adăugate într-un \texttt{GraphicsLayer}.
+    \item \textbf{Element Distinctiv (Heatmap):} Se va utiliza clasa \texttt{HeatmapRenderer} din API-ul ArcGIS, aplicată pe layer-ul de puncte aprobat, configurând culorile și raza de influență (`blurRadius`, `maxPixelIntensity`).
+    \item \textbf{Autentificare:} Firebase Authentication SDK (Email/Password provider).
+    \item \textbf{Securitate:} Firebase Security Rules pentru a preveni scrierea neautorizată în colecția `tickets`.
+\end{itemize}
+
+\section{Organizare Activități}
+
+\subsection{Distribuția Task-urilor}
+
+\begin{tabular}{|p{3cm}|p{8cm}|p{3cm}|}
+\hline
+\textbf{Membru} & \textbf{Descriere Task} & \textbf{Termen} \\
+\hline
+\textbf{Student 1} & Configurare Next.js și integrare Firebase Auth (Login/Register/Role Management). Creare structură Firestore și reguli de securitate. & Săptămâna 1-2 \\
+\hline
+\textbf{Student 2} & Integrare ArcGIS SDK în Next.js. Implementare funcționalitate "Click pe hartă" pentru preluare coordonate. Formular creare tichet + Upload poză (Firebase Storage). & Săptămâna 2-3 \\
+\hline
+\textbf{Student 3} & Implementare Dashboard Admin (Listare tichete, butoane Aprobare/Respingere). Implementare \textbf{HeatmapRenderer} pe hartă (Element distinctiv). & Săptămâna 3-4 \\
+\hline
+\end{tabular}
+
+\subsection{Planificare (Gantt)}
+\begin{center}
+    \textit{[Aici inserați diagrama Gantt]}
+\end{center}
+
+\section{Identificarea Riscurilor}
+
+\begin{table}[h!]
+\centering
+\begin{tabular}{|p{4cm}|p{2cm}|p{2cm}|p{6cm}|}
+\hline
+\textbf{Risc} & \textbf{Probab.} & \textbf{Impact} & \textbf{Măsuri de Contracarare} \\
+\hline
+Limita gratuită Firebase (Quota Exceeded) & Mică & Mare & Monitorizarea utilizării în consolă și optimizarea citirilor din DB (caching local). \\
+\hline
+Complexitatea integrării ArcGIS cu React/SSR & Medie & Mediu & Utilizarea importurilor dinamice (`next/dynamic`) pentru a încărca harta doar pe client (no-SSR). \\
+\hline
+Date insuficiente pentru Heatmap & Mare & Mediu & Crearea unui script de \textit{seeding} care generează 100 de tichete dummy pentru demonstrație. \\
+\hline
+\end{tabular}
+\end{table}
+
+\section{Presupuneri}
+\begin{itemize}
+    \item Presupunem că administratorul are responsabilitatea de a verifica veridicitatea pozelor încărcate înainte de a aproba tichetul.
+    \item Presupunem că o conexiune la internet este permanent disponibilă pentru încărcarea hărților ArcGIS (nu există mod offline).
+    \item Pentru generarea Heatmap-ului, se presupune că toate incidentele au o "greutate" egală, indiferent de categorie.
+\end{itemize}
+
+\end{document}
