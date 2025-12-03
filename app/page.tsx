@@ -3,6 +3,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AlertTriangle, CheckCircle, Users } from "lucide-react";
 
+import ArcgisMap from "./map/map-wrapper";
+
 export default function Home() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-background to-muted">
@@ -33,6 +35,7 @@ export default function Home() {
             broken streetlights, or other civic problems. Track their resolution
             in real-time.
           </p>
+
           <div className="flex items-center justify-center gap-4">
             <Button size="lg" asChild>
               <Link href="/register">Create Account</Link>
@@ -89,6 +92,11 @@ export default function Home() {
               </p>
             </CardContent>
           </Card>
+        </div>
+
+        {/* Harta ArcGIS */}
+        <div className="mt-24">
+          <ArcgisMap />
         </div>
       </main>
 
