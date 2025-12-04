@@ -35,7 +35,7 @@ export default function RegisterPage() {
 
   useEffect(() => {
     if (!loading && user) {
-      router.push("/profile");
+      router.push("/");
     }
   }, [user, loading, router]);
 
@@ -109,7 +109,7 @@ export default function RegisterPage() {
         }
       }
 
-      router.push("/profile");
+      router.push("/");
     } catch (err: unknown) {
       const errorCode = (err as { code?: string })?.code || "";
       setError(getErrorMessage(errorCode));

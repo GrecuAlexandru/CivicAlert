@@ -6,6 +6,7 @@ import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,7 +21,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { Loader2, CheckCircle2, AlertCircle, LogOut } from "lucide-react";
+import { Loader2, CheckCircle2, AlertCircle, LogOut, Home } from "lucide-react";
 
 interface UserProfile {
   uid: string;
@@ -133,10 +134,21 @@ export default function ProfilePage() {
           <CardHeader>
             <div className="flex items-center justify-between">
               <CardTitle className="text-2xl">My Profile</CardTitle>
-              <Button variant="destructive" size="sm" onClick={logout}>
-                <LogOut className="mr-2 h-4 w-4" />
-                Sign Out
-              </Button>
+
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" asChild>
+                  <Link href="/">
+                    <Home className="mr-2 h-4 w-4" />
+                    Back to Home
+                  </Link>
+                </Button>
+                
+                <Button variant="destructive" size="sm" onClick={logout}>
+                  <LogOut className="mr-2 h-4 w-4" />
+                  Sign Out
+                </Button>
+              </div>
+
             </div>
           </CardHeader>
 

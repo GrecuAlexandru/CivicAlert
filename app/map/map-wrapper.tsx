@@ -1,4 +1,4 @@
-"use client"; // OBLIGATORIU
+"use client";
 
 import dynamic from "next/dynamic";
 

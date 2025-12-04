@@ -24,6 +24,8 @@ export default function ArcgisMap() {
       zoom: 10
     });
 
+    view.ui.remove("attribution");
+
     return () => {
       view.destroy();
     };
@@ -32,7 +34,7 @@ export default function ArcgisMap() {
   return (
     <div
       ref={mapRef}
-      style={{ width: "100%", height: "400px", borderRadius: "12px" }}
+      style={{ width: "100%", height: "600px", borderRadius: "12px" }}
     ></div>
   );
 }
