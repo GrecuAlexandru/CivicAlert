@@ -5,7 +5,11 @@ import Map from "@arcgis/core/Map";
 import MapView from "@arcgis/core/views/MapView";
 import Config from "@arcgis/core/config";
 
-export default function ArcgisMap() {
+interface ArcgisMapProps {
+  center?: number[];
+}
+
+export default function ArcgisMap({ center }: ArcgisMapProps) {
   const mapRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -20,8 +24,8 @@ export default function ArcgisMap() {
     const view = new MapView({
       container: mapRef.current,
       map,
-      center: [-118.7368, 34.0781],
-      zoom: 10
+      center: center,
+      zoom: 12
     });
 
     view.ui.remove("attribution");
@@ -29,7 +33,7 @@ export default function ArcgisMap() {
     return () => {
       view.destroy();
     };
-  }, []);
+  }, [center]);
 
   return (
     <div

@@ -14,8 +14,8 @@ export default function Home() {
   const { user, loading: authLoading } = useAuth();
   const [profileComplete, setProfileComplete] = useState(false);
   const [checkingProfile, setCheckingProfile] = useState(true);
+  const [mapCenter, setMapCenter] = useState<number[] | undefined>(undefined);
 
-  // Verificăm datele din Firestore când avem un user
   useEffect(() => {
     const checkUserProfile = async () => {
       if (!user) {
@@ -35,6 +35,7 @@ export default function Home() {
             data.homeCity.longitude !== 0
           ) {
             setProfileComplete(true);
+            setMapCenter([data.homeCity.longitude, data.homeCity.latitude]);
           } else {
             setProfileComplete(false);
           }
@@ -197,7 +198,7 @@ export default function Home() {
                 <h3 className="text-2xl font-bold">Live Incidents Map</h3>
               </div>
               <div className="max-w-6xl mx-auto shadow-md rounded-xl overflow-hidden">
-                <ArcgisMap />
+                <ArcgisMap center={mapCenter} />
               </div>
             </div>
           )}

@@ -6,6 +6,6 @@ const ArcgisMap = dynamic(() => import("./Map"), {
   ssr: false,
 });
 
-export default function MapWrapper() {
-  return <ArcgisMap />;
+export default function MapWrapper(props: any) {
+  return <ArcgisMap {...props} />;
 }
