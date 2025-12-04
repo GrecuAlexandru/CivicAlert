@@ -4,12 +4,15 @@ import { useEffect, useRef } from "react";
 import Map from "@arcgis/core/Map";
 import MapView from "@arcgis/core/views/MapView";
 import Config from "@arcgis/core/config";
+import GraphicsLayer from "@arcgis/core/layers/GraphicsLayer";
+import Graphic from "@arcgis/core/Graphic";
 
 interface ArcgisMapProps {
   center?: number[];
+  onLocationSelect?: (coords: { latitude: number; longitude: number }) => void;
 }
 
-export default function ArcgisMap({ center }: ArcgisMapProps) {
+export default function ArcgisMap({ center, onLocationSelect }: ArcgisMapProps) {
   const mapRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -24,11 +27,44 @@ export default function ArcgisMap({ center }: ArcgisMapProps) {
     const view = new MapView({
       container: mapRef.current,
       map,
-      center: center,
-      zoom: 12
+      center: center || [25.0, 46.0],
+      zoom: center? 12 : 6
     });
 
     view.ui.remove("attribution");
+
+    // Add layer for selected marker
+    const graphicsLayer = new GraphicsLayer();
+    map.add(graphicsLayer);
+
+    if (onLocationSelect) {
+      view.on("click", (event) => {
+        graphicsLayer.removeAll();
+
+        const point = event.mapPoint;
+        
+        const simpleMarkerSymbol = {
+          type: "simple-marker" as const,
+          color: [226, 119, 40],
+          outline: {
+            color: [255, 255, 255],
+            width: 1
+          }
+        };
+
+        const pointGraphic = new Graphic({
+          geometry: point,
+          symbol: simpleMarkerSymbol
+        });
+
+        graphicsLayer.add(pointGraphic);
+
+        onLocationSelect({
+          latitude: point.latitude,
+          longitude: point.longitude
+        });
+      });
+    }
 
     return () => {
       view.destroy();

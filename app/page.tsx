@@ -3,10 +3,10 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { AlertTriangle, CheckCircle, Users, Loader2, MapPin } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
+import { AlertTriangle, CheckCircle, Users, Loader2, MapPin, Save } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
-import { doc, getDoc } from "firebase/firestore";
+import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import ArcgisMap from "./map/map-wrapper";
 
@@ -14,7 +14,11 @@ export default function Home() {
   const { user, loading: authLoading } = useAuth();
   const [profileComplete, setProfileComplete] = useState(false);
   const [checkingProfile, setCheckingProfile] = useState(true);
+  const [cityName, setCityName] = useState("");
   const [mapCenter, setMapCenter] = useState<number[] | undefined>(undefined);
+
+  const [selectedCoords, setSelectedCoords] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [isSavingLocation, setIsSavingLocation] = useState(false);
 
   useEffect(() => {
     const checkUserProfile = async () => {
@@ -27,17 +31,19 @@ export default function Home() {
         const userDoc = await getDoc(doc(db, "users", user.uid));
         if (userDoc.exists()) {
           const data = userDoc.data();
-          // Check if coordinates and home city are set
-          if (
-            data.homeCity &&
-            data.homeCity.name &&
-            data.homeCity.latitude !== 0 &&
-            data.homeCity.longitude !== 0
-          ) {
-            setProfileComplete(true);
-            setMapCenter([data.homeCity.longitude, data.homeCity.latitude]);
+          // Check if coordinates are set
+          if (data.homeCity) {
+            // If user already set the city name before the coordinates, keep the name
+            if (data.homeCity.name) {
+              setCityName(data.homeCity.name);
+            }
+
+            if (data.homeCity && data.homeCity.latitude !== 0 && data.homeCity.longitude !== 0) {
+              setProfileComplete(true);
+              setMapCenter([data.homeCity.longitude, data.homeCity.latitude]);
           } else {
-            setProfileComplete(false);
+              setProfileComplete(false);
+          }
           }
         }
       } catch (error) {
@@ -51,6 +57,28 @@ export default function Home() {
       checkUserProfile();
     }
   }, [user, authLoading]);
+
+  const handleSaveLocation = async () => {
+    if (!user || !selectedCoords) return;
+
+    setIsSavingLocation(true);
+    try {
+      await updateDoc(doc(db, "users", user.uid), {
+        homeCity: {
+          name: cityName || "Type your city",
+          latitude: selectedCoords.latitude,
+          longitude: selectedCoords.longitude
+        }
+      });
+
+      setMapCenter([selectedCoords.longitude, selectedCoords.latitude]);
+      setProfileComplete(true);
+    } catch (error) {
+      console.error("Error saving location:", error);
+    } finally {
+      setIsSavingLocation(false);
+    }
+  };
 
   if (authLoading || (user && checkingProfile)) {
     return (
@@ -159,50 +187,84 @@ export default function Home() {
         </div>
       </main>
 
-        {/* ArcGIS Map */}
-        <div className="mt-4">
-          {!user ? (
-            // If the user is not signed in, display message
-            <Card className="text-center p-10 bg-muted/50 border-dashed">
-              <div className="flex flex-col items-center gap-4">
-                <MapPin className="h-12 w-12 text-muted-foreground" />
-                <h3 className="text-xl font-semibold">Interactive Map</h3>
-                <p className="text-muted-foreground">
-                  Please log in to access the live incident map.
-                </p>
-              </div>
-            </Card>
-          ) : !profileComplete ? (
-            // If the user is signed in but the coordinates and
-            // home city are not set, display the Profile Settings button
-            <Card className="border-yellow-500/50 bg-yellow-50 dark:bg-yellow-950/20">
-              <CardContent className="flex flex-col items-center justify-center py-10 gap-4">
-                <AlertTriangle className="h-12 w-12 text-yellow-600 dark:text-yellow-500" />
-                <h3 className="text-2xl font-bold text-center">
-                  Setup Required
-                </h3>
-                <p className="text-center text-muted-foreground max-w-md">
-                  To view the incidents map, please update your profile with your
-                  Home City and Coordinates. This helps us center the map on
-                  your community.
-                </p>
-                <Button size="lg" asChild>
-                  <Link href="/profile">Go to Profile Settings</Link>
-                </Button>
-              </CardContent>
-            </Card>
-          ) : (
-            // Display the map
-            <div className="space-y-4">
-              <div className="relative flex items-center justify-center py-2">
-                <h3 className="text-2xl font-bold">Live Incidents Map</h3>
-              </div>
-              <div className="max-w-6xl mx-auto shadow-md rounded-xl overflow-hidden">
-                <ArcgisMap center={mapCenter} />
-              </div>
+      {/* ArcGIS Map area */}
+      <div className="mt-4 px-6 pb-20">
+        {!user ? (
+          // If the user is not signed in, display message
+          <Card className="text-center p-10 bg-muted/50 border-dashed">
+            <div className="flex flex-col items-center gap-4">
+              <MapPin className="h-12 w-12 text-muted-foreground" />
+              <h3 className="text-xl font-semibold">Interactive Map</h3>
+              <p className="text-muted-foreground">
+                Please log in to access the live incident map.
+              </p>
             </div>
-          )}
-        </div>
+          </Card>
+        ) : !profileComplete ? (
+          // If the user is signed in but the coordinates
+          // are not set, display the Profile Settings button
+          <div className="max-w-4xl mx-auto">
+              <Card className="border-blue-500/50 shadow-lg animate-in fade-in zoom-in duration-500">
+                <CardHeader>
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-full">
+                      <MapPin className="h-6 w-6 text-blue-600 dark:text-blue-400" />
+                    </div>
+                    <div>
+                      <CardTitle>Select your city</CardTitle>
+                      <CardDescription>
+                        To see or add reports in your area, click on the map where your city is located.
+                      </CardDescription>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="h-[500px] w-full rounded-xl overflow-hidden border-2 border-muted relative">
+                    {/* Map in selection mode */}
+                    <ArcgisMap onLocationSelect={setSelectedCoords} />
+                    
+                    {/* Instructions that disappear after selection */}
+                    {!selectedCoords && (
+                      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 bg-white/90 dark:bg-black/80 backdrop-blur px-4 py-2 rounded-full shadow-sm text-sm font-medium animate-pulse border">
+                        Click on the map to select the location
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+                <CardFooter className="flex justify-between items-center border-t pt-6 bg-muted/20">
+                  <Button
+                    size="lg" 
+                    onClick={handleSaveLocation} 
+                    disabled={!selectedCoords || isSavingLocation}
+                    className={selectedCoords ? "animate-pulse" : ""}
+                  >
+                    {isSavingLocation ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Saving...
+                      </>
+                    ) : (
+                      <>
+                        <Save className="mr-2 h-4 w-4" />
+                        Save and continue
+                      </>
+                    )}
+                  </Button>
+                </CardFooter>
+              </Card>
+            </div>
+        ) : (
+          // Display the map
+          <div className="space-y-4">
+            <div className="relative flex items-center justify-center py-2">
+              <h3 className="text-2xl font-bold">Live Incidents Map</h3>
+            </div>
+            <div className="max-w-6xl mx-auto shadow-md rounded-xl overflow-hidden">
+              <ArcgisMap center={mapCenter} />
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Footer */}
       <footer className="max-w-6xl mx-auto px-6 py-8 mt-12 border-t">
