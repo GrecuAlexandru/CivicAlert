@@ -1,277 +1,507 @@
 "use client";
 
-import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useState, useEffect } from "react";
+import MapWrapper from "@/app/map/map-wrapper";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
-import { AlertTriangle, CheckCircle, Users, Loader2, MapPin, Save } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useAuth } from "@/contexts/AuthContext";
-import { doc, getDoc, updateDoc } from "firebase/firestore";
-import { db } from "@/lib/firebase";
-import ArcgisMap from "./map/map-wrapper";
+import Link from "next/link";
+import {
+  Plus,
+  Search,
+  MapPin,
+  ThumbsUp,
+  MessageSquare,
+  Menu,
+  X,
+  ArrowUpDown,
+  Camera,
+} from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
+import {
+  doc,
+  getDoc,
+  addDoc,
+  collection,
+  serverTimestamp,
+  GeoPoint,
+} from "firebase/firestore";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { db, storage } from "@/lib/firebase";
+import { v4 as uuidv4 } from "uuid";
 
 export default function Home() {
-  const { user, loading: authLoading } = useAuth();
-  const [profileComplete, setProfileComplete] = useState(false);
-  const [checkingProfile, setCheckingProfile] = useState(true);
-  const [cityName, setCityName] = useState("");
-  const [mapCenter, setMapCenter] = useState<number[] | undefined>(undefined);
+  const { user } = useAuth();
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [userPhoto, setUserPhoto] = useState<string | null>(null);
 
-  const [selectedCoords, setSelectedCoords] = useState<{ latitude: number; longitude: number } | null>(null);
-  const [isSavingLocation, setIsSavingLocation] = useState(false);
+  // Reporting State
+  const [isReporting, setIsReporting] = useState(false);
+  const [reportLocation, setReportLocation] = useState<{
+    latitude: number;
+    longitude: number;
+  } | null>(null);
+  const [reportModalOpen, setReportModalOpen] = useState(false);
+
+  // Form State
+  const [title, setTitle] = useState("");
+  const [category, setCategory] = useState("");
+  const [description, setDescription] = useState("");
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    const checkUserProfile = async () => {
-      if (!user) {
-        setCheckingProfile(false);
-        return;
-      }
-
-      try {
-        const userDoc = await getDoc(doc(db, "users", user.uid));
-        if (userDoc.exists()) {
-          const data = userDoc.data();
-          // Check if coordinates are set
-          if (data.homeCity) {
-            // If user already set the city name before the coordinates, keep the name
-            if (data.homeCity.name) {
-              setCityName(data.homeCity.name);
+    if (user) {
+      const fetchUserData = async () => {
+        try {
+          const userDoc = await getDoc(doc(db, "users", user.uid));
+          if (userDoc.exists()) {
+            const data = userDoc.data();
+            if (data.photoUrl) {
+              setUserPhoto(data.photoUrl);
             }
-
-            if (data.homeCity && data.homeCity.latitude !== 0 && data.homeCity.longitude !== 0) {
-              setProfileComplete(true);
-              setMapCenter([data.homeCity.longitude, data.homeCity.latitude]);
-          } else {
-              setProfileComplete(false);
           }
-          }
+        } catch (error) {
+          console.error("Error fetching user data:", error);
         }
-      } catch (error) {
-        console.error("Error fetching user profile:", error);
-      } finally {
-        setCheckingProfile(false);
-      }
-    };
-
-    if (!authLoading) {
-      checkUserProfile();
+      };
+      fetchUserData();
     }
-  }, [user, authLoading]);
+  }, [user]);
 
-  const handleSaveLocation = async () => {
-    if (!user || !selectedCoords) return;
+  const handleStartReporting = () => {
+    setIsReporting(true);
+    setSidebarOpen(false); // Close sidebar to give full view of map
+  };
 
-    setIsSavingLocation(true);
+  const handleLocationSelect = (coords: {
+    latitude: number;
+    longitude: number;
+  }) => {
+    setReportLocation(coords);
+    setIsReporting(false);
+    setReportModalOpen(true);
+    setSidebarOpen(true); // Re-open sidebar
+  };
+
+  const handleCancelReporting = () => {
+    setIsReporting(false);
+    setSidebarOpen(true);
+  };
+
+  const handleSubmitReport = async () => {
+    if (!user || !reportLocation || !category) return;
+
+    setIsSubmitting(true);
+
     try {
-      await updateDoc(doc(db, "users", user.uid), {
-        homeCity: {
-          name: cityName || "Type your city",
-          latitude: selectedCoords.latitude,
-          longitude: selectedCoords.longitude
-        }
+      const imageUrls: string[] = [];
+
+      if (photoFile) {
+        const imageRef = ref(storage, `ticket-images/${uuidv4()}`);
+        await uploadBytes(imageRef, photoFile);
+        const url = await getDownloadURL(imageRef);
+        imageUrls.push(url);
+      }
+
+      await addDoc(collection(db, "tickets"), {
+        userId: user.uid,
+        category,
+        description,
+        status: "pending",
+        location: {
+          latitude: reportLocation.latitude,
+          longitude: reportLocation.longitude,
+        },
+        imageUrls,
+        votes: [],
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
       });
 
-      setMapCenter([selectedCoords.longitude, selectedCoords.latitude]);
-      setProfileComplete(true);
+      // Reset form
+      setTitle("");
+      setCategory("");
+      setDescription("");
+      setPhotoFile(null);
+      setReportModalOpen(false);
+
+      // Ideally show a success toast here
+      console.log("Ticket reported successfully");
     } catch (error) {
-      console.error("Error saving location:", error);
+      console.error("Error reporting ticket:", error);
     } finally {
-      setIsSavingLocation(false);
+      setIsSubmitting(false);
     }
   };
 
-  if (authLoading || (user && checkingProfile)) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <Loader2 className="h-12 w-12 animate-spin text-primary" />
-      </div>
-    );
-  }
-
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background to-muted">
-      {/* Header */}
-      <header className="px-6 py-4 border-b">
-        <nav className="max-w-6xl mx-auto flex items-center justify-between">
-          <h1 className="text-2xl font-bold">CivicAlert</h1>
-          <div className="flex items-center gap-4">
-            {!user ? (
-              <>
-                <Button variant="ghost" asChild>
-                  <Link href="/login">Sign In</Link>
-                </Button>
-                <Button asChild>
-                  <Link href="/register">Get Started</Link>
-                </Button>
-              </>
-            ) : (
-              <Button variant="outline" asChild>
-                <Link href="/profile">My Profile</Link>
-              </Button>
-            )}
-          </div>
-        </nav>
-      </header>
-
-      {/* Hero Section */}
-      <main className="max-w-6xl mx-auto px-6 py-20">
-        <div className="text-center">
-          <h2 className="text-5xl font-bold mb-6">
-            Report & Track
-            <span className="text-primary"> Civic Issues</span>
-          </h2>
-          <p className="text-xl text-muted-foreground max-w-2xl mx-auto mb-10">
-            Help improve your community by reporting issues like potholes,
-            broken streetlights, or other civic problems. Track their resolution
-            in real-time.
-          </p>
-
-          {!user && (
-            <div className="flex items-center justify-center gap-4">
-              <Button size="lg" asChild>
-                <Link href="/register">Create Account</Link>
-              </Button>
-              <Button size="lg" variant="outline" asChild>
-                <Link href="/login">Sign In</Link>
-              </Button>
+    <div className="flex h-screen w-full overflow-hidden bg-background relative">
+      {/* Sidebar */}
+      <aside
+        className={`
+          absolute md:relative z-20 h-full bg-card border-r shadow-xl transition-all duration-300 ease-in-out flex flex-col
+          ${
+            sidebarOpen
+              ? "w-full md:w-96 translate-x-0"
+              : "w-0 -translate-x-full md:translate-x-0 md:w-0 md:overflow-hidden"
+          }
+        `}
+      >
+        {/* Header */}
+        <div className="p-4 border-b flex items-center justify-between bg-card shrink-0">
+          <div className="flex items-center gap-2">
+            <div className="h-8 w-8 bg-primary rounded-lg flex items-center justify-center">
+              <MapPin className="h-5 w-5 text-primary-foreground" />
             </div>
-          )}
+            <h1 className="text-xl font-bold text-foreground">CivicAlert</h1>
+          </div>
+          <div className="flex items-center gap-2">
+            {user ? (
+              <Link href="/profile">
+                <Avatar className="h-8 w-8 cursor-pointer hover:opacity-80 transition ring-2 ring-background">
+                  <AvatarImage src={userPhoto || user.photoURL || ""} />
+                  <AvatarFallback>
+                    {user.email?.charAt(0).toUpperCase()}
+                  </AvatarFallback>
+                </Avatar>
+              </Link>
+            ) : (
+              <Link href="/login">
+                <Button size="sm" variant="outline">
+                  Login
+                </Button>
+              </Link>
+            )}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="md:hidden"
+              onClick={() => setSidebarOpen(false)}
+            >
+              <X className="h-5 w-5" />
+            </Button>
+          </div>
         </div>
 
-        {/* Features */}
-        <div className="mt-24 grid md:grid-cols-3 gap-8">
-          <Card>
-            <CardHeader>
-              <div className="w-12 h-12 bg-primary/10 rounded-lg flex items-center justify-center mb-4">
-                <AlertTriangle className="w-6 h-6 text-primary" />
+        {/* Feed Controls */}
+        <div className="p-4 space-y-4 shrink-0">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input placeholder="Search incidents..." className="pl-9" />
+          </div>
+
+          <Tabs defaultValue="all" className="w-full">
+            <TabsList className="w-full grid grid-cols-3">
+              <TabsTrigger value="all">All</TabsTrigger>
+              <TabsTrigger value="mine">Mine</TabsTrigger>
+              <TabsTrigger value="nearby">Nearby</TabsTrigger>
+            </TabsList>
+          </Tabs>
+
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide flex-1">
+              <Badge
+                variant="secondary"
+                className="cursor-pointer whitespace-nowrap hover:bg-secondary/80"
+              >
+                Infrastructure
+              </Badge>
+              <Badge
+                variant="outline"
+                className="cursor-pointer whitespace-nowrap hover:bg-accent"
+              >
+                Safety
+              </Badge>
+              <Badge
+                variant="outline"
+                className="cursor-pointer whitespace-nowrap hover:bg-accent"
+              >
+                Environment
+              </Badge>
+            </div>
+
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="h-8 w-8">
+                  <ArrowUpDown className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem>Newest First</DropdownMenuItem>
+                <DropdownMenuItem>Most Voted</DropdownMenuItem>
+                <DropdownMenuItem>Most Discussed</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
+
+        {/* Ticket List */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-muted/20">
+          {/* Placeholder for tickets */}
+          <Card className="cursor-pointer hover:shadow-md transition-shadow border-l-4 border-l-blue-500">
+            <CardContent className="p-4 space-y-3">
+              <div className="flex justify-between items-start">
+                <Badge
+                  variant="secondary"
+                  className="bg-blue-100 text-blue-700 hover:bg-blue-200"
+                >
+                  Infrastructure
+                </Badge>
+                <span className="text-xs text-muted-foreground">2h ago</span>
               </div>
-              <CardTitle>Report Issues</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-muted-foreground">
-                Easily report civic problems with photos and location. Help
-                authorities identify issues faster.
+              <h3 className="font-semibold">Pothole on Main Street</h3>
+              <p className="text-sm text-muted-foreground line-clamp-2">
+                Large pothole causing traffic slowdown near the central park
+                entrance.
               </p>
+              <div className="flex items-center justify-between pt-2">
+                <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                  <div className="flex items-center gap-1 hover:text-primary transition-colors">
+                    <ThumbsUp className="h-3 w-3" /> 12
+                  </div>
+                  <div className="flex items-center gap-1 hover:text-primary transition-colors">
+                    <MessageSquare className="h-3 w-3" /> 5
+                  </div>
+                </div>
+                <Badge variant="outline" className="text-xs font-normal">
+                  Pending
+                </Badge>
+              </div>
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <div className="w-12 h-12 bg-green-500/10 rounded-lg flex items-center justify-center mb-4">
-                <CheckCircle className="w-6 h-6 text-green-500" />
+          <Card className="cursor-pointer hover:shadow-md transition-shadow border-l-4 border-l-red-500">
+            <CardContent className="p-4 space-y-3">
+              <div className="flex justify-between items-start">
+                <Badge
+                  variant="secondary"
+                  className="bg-red-100 text-red-700 hover:bg-red-200"
+                >
+                  Public Safety
+                </Badge>
+                <span className="text-xs text-muted-foreground">5h ago</span>
               </div>
-              <CardTitle>Track Progress</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-muted-foreground">
-                Follow the status of your reports from submission to resolution.
-                Stay informed every step.
+              <h3 className="font-semibold">Broken Street Light</h3>
+              <p className="text-sm text-muted-foreground line-clamp-2">
+                Street light completely out at the intersection of 5th and Elm.
               </p>
+              <div className="flex items-center justify-between pt-2">
+                <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                  <div className="flex items-center gap-1 hover:text-primary transition-colors">
+                    <ThumbsUp className="h-3 w-3" /> 8
+                  </div>
+                  <div className="flex items-center gap-1 hover:text-primary transition-colors">
+                    <MessageSquare className="h-3 w-3" /> 2
+                  </div>
+                </div>
+                <Badge variant="outline" className="text-xs font-normal">
+                  In Progress
+                </Badge>
+              </div>
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <div className="w-12 h-12 bg-purple-500/10 rounded-lg flex items-center justify-center mb-4">
-                <Users className="w-6 h-6 text-purple-500" />
+          <Card className="cursor-pointer hover:shadow-md transition-shadow border-l-4 border-l-green-500 opacity-75">
+            <CardContent className="p-4 space-y-3">
+              <div className="flex justify-between items-start">
+                <Badge
+                  variant="secondary"
+                  className="bg-green-100 text-green-700 hover:bg-green-200"
+                >
+                  Environment
+                </Badge>
+                <span className="text-xs text-muted-foreground">1d ago</span>
               </div>
-              <CardTitle>Community Driven</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-muted-foreground">
-                Join other citizens in making your city better. See what others
-                are reporting in your area.
+              <h3 className="font-semibold">Fallen Tree Branch</h3>
+              <p className="text-sm text-muted-foreground line-clamp-2">
+                Branch blocking the sidewalk on Oak Avenue.
               </p>
+              <div className="flex items-center justify-between pt-2">
+                <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                  <div className="flex items-center gap-1 hover:text-primary transition-colors">
+                    <ThumbsUp className="h-3 w-3" /> 24
+                  </div>
+                  <div className="flex items-center gap-1 hover:text-primary transition-colors">
+                    <MessageSquare className="h-3 w-3" /> 8
+                  </div>
+                </div>
+                <Badge
+                  variant="outline"
+                  className="text-xs font-normal bg-green-50 text-green-700 border-green-200"
+                >
+                  Resolved
+                </Badge>
+              </div>
             </CardContent>
           </Card>
+        </div>
+
+        {/* Footer Actions */}
+        <div className="p-4 border-t bg-card shrink-0">
+          <Button
+            className="w-full gap-2 shadow-lg hover:shadow-xl transition-all"
+            size="lg"
+            onClick={handleStartReporting}
+          >
+            <Plus className="h-5 w-5" /> Report New Incident
+          </Button>
+        </div>
+      </aside>
+
+      {/* Map Area */}
+      <main className="flex-1 relative h-full w-full">
+        {/* Toggle Button */}
+        <div className="absolute top-4 left-4 z-10">
+          <Button
+            variant="secondary"
+            size="icon"
+            className="shadow-md bg-background/90 backdrop-blur-sm hover:bg-background"
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+          >
+            {sidebarOpen ? (
+              <X className="h-5 w-5" />
+            ) : (
+              <Menu className="h-5 w-5" />
+            )}
+          </Button>
+        </div>
+
+        {/* Reporting Overlay Instructions */}
+        {isReporting && (
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 bg-background/90 backdrop-blur-sm p-4 rounded-lg shadow-lg border flex flex-col items-center gap-2 animate-in fade-in slide-in-from-top-4">
+            <p className="font-semibold">
+              Click on the map to select the incident location
+            </p>
+            <Button variant="outline" size="sm" onClick={handleCancelReporting}>
+              Cancel
+            </Button>
+          </div>
+        )}
+
+        {/* Map Component */}
+        <div className="h-full w-full">
+          <MapWrapper
+            className="h-full w-full"
+            isSelecting={isReporting}
+            onLocationSelect={handleLocationSelect}
+          />
         </div>
       </main>
 
-      {/* ArcGIS Map area */}
-      <div className="mt-4 px-6 pb-20">
-        {!user ? (
-          // If the user is not signed in, display message
-          <Card className="text-center p-10 bg-muted/50 border-dashed">
-            <div className="flex flex-col items-center gap-4">
-              <MapPin className="h-12 w-12 text-muted-foreground" />
-              <h3 className="text-xl font-semibold">Interactive Map</h3>
-              <p className="text-muted-foreground">
-                Please log in to access the live incident map.
-              </p>
+      {/* Report Incident Modal */}
+      <Dialog open={reportModalOpen} onOpenChange={setReportModalOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Report New Incident</DialogTitle>
+            <DialogDescription>
+              Provide details about the issue you observed.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="title">Title</Label>
+              <Input
+                id="title"
+                placeholder="e.g., Large Pothole"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+              />
             </div>
-          </Card>
-        ) : !profileComplete ? (
-          // If the user is signed in but the coordinates
-          // are not set, display the Profile Settings button
-          <div className="max-w-4xl mx-auto">
-              <Card className="border-blue-500/50 shadow-lg animate-in fade-in zoom-in duration-500">
-                <CardHeader>
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-full">
-                      <MapPin className="h-6 w-6 text-blue-600 dark:text-blue-400" />
-                    </div>
-                    <div>
-                      <CardTitle>Select your city</CardTitle>
-                      <CardDescription>
-                        To see or add reports in your area, click on the map where your city is located.
-                      </CardDescription>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <div className="h-[500px] w-full rounded-xl overflow-hidden border-2 border-muted relative">
-                    {/* Map in selection mode */}
-                    <ArcgisMap onLocationSelect={setSelectedCoords} />
-                    
-                    {/* Instructions that disappear after selection */}
-                    {!selectedCoords && (
-                      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 bg-white/90 dark:bg-black/80 backdrop-blur px-4 py-2 rounded-full shadow-sm text-sm font-medium animate-pulse border">
-                        Click on the map to select the location
-                      </div>
-                    )}
-                  </div>
-                </CardContent>
-                <CardFooter className="flex justify-between items-center border-t pt-6 bg-muted/20">
-                  <Button
-                    size="lg" 
-                    onClick={handleSaveLocation} 
-                    disabled={!selectedCoords || isSavingLocation}
-                    className={selectedCoords ? "animate-pulse" : ""}
-                  >
-                    {isSavingLocation ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Saving...
-                      </>
-                    ) : (
-                      <>
-                        <Save className="mr-2 h-4 w-4" />
-                        Save and continue
-                      </>
-                    )}
-                  </Button>
-                </CardFooter>
-              </Card>
+            <div className="grid gap-2">
+              <Label htmlFor="category">Category</Label>
+              <Select value={category} onValueChange={setCategory}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select category" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="infrastructure">Infrastructure</SelectItem>
+                  <SelectItem value="safety">Public Safety</SelectItem>
+                  <SelectItem value="environment">Environment</SelectItem>
+                  <SelectItem value="other">Other</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
-        ) : (
-          // Display the map
-          <div className="space-y-4">
-            <div className="relative flex items-center justify-center py-2">
-              <h3 className="text-2xl font-bold">Live Incidents Map</h3>
+            <div className="grid gap-2">
+              <Label htmlFor="description">Description</Label>
+              <Textarea
+                id="description"
+                placeholder="Describe the issue in detail..."
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+              />
             </div>
-            <div className="max-w-6xl mx-auto shadow-md rounded-xl overflow-hidden">
-              <ArcgisMap center={mapCenter} />
+            <div className="grid gap-2">
+              <Label htmlFor="photos">Photos</Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  id="photos"
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    if (e.target.files && e.target.files[0]) {
+                      setPhotoFile(e.target.files[0]);
+                    }
+                  }}
+                />
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => document.getElementById("photos")?.click()}
+                >
+                  <Camera className="mr-2 h-4 w-4" />{" "}
+                  {photoFile ? "Photo Selected" : "Upload Photo"}
+                </Button>
+              </div>
             </div>
+            {reportLocation && (
+              <div className="text-xs text-muted-foreground">
+                Location selected: {reportLocation.latitude.toFixed(6)},{" "}
+                {reportLocation.longitude.toFixed(6)}
+              </div>
+            )}
           </div>
-        )}
-      </div>
-
-      {/* Footer */}
-      <footer className="max-w-6xl mx-auto px-6 py-8 mt-12 border-t">
-        <p className="text-center text-muted-foreground">
-          © 2024 CivicAlert. University Project.
-        </p>
-      </footer>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setReportModalOpen(false)}
+              disabled={isSubmitting}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleSubmitReport} disabled={isSubmitting}>
+              {isSubmitting ? "Submitting..." : "Submit Report"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

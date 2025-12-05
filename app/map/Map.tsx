@@ -1,80 +1,159 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import Map from "@arcgis/core/Map";
 import MapView from "@arcgis/core/views/MapView";
 import Config from "@arcgis/core/config";
 import GraphicsLayer from "@arcgis/core/layers/GraphicsLayer";
 import Graphic from "@arcgis/core/Graphic";
+import esriConfig from "@arcgis/core/config";
 
 interface ArcgisMapProps {
   center?: number[];
   onLocationSelect?: (coords: { latitude: number; longitude: number }) => void;
+  isSelecting?: boolean;
+  className?: string;
 }
 
-export default function ArcgisMap({ center, onLocationSelect }: ArcgisMapProps) {
+// Set API key once at module level
+if (process.env.NEXT_PUBLIC_ARCGIS_API_KEY) {
+  esriConfig.apiKey = process.env.NEXT_PUBLIC_ARCGIS_API_KEY;
+}
+
+export default function ArcgisMap({
+  center,
+  onLocationSelect,
+  isSelecting = false,
+  className,
+}: ArcgisMapProps) {
   const mapRef = useRef<HTMLDivElement>(null);
+  const viewRef = useRef<MapView | null>(null);
+  const onLocationSelectRef = useRef(onLocationSelect);
+  const isSelectingRef = useRef(isSelecting);
+
+  // Update refs when props change
+  useEffect(() => {
+    onLocationSelectRef.current = onLocationSelect;
+    isSelectingRef.current = isSelecting;
+
+    if (viewRef.current && viewRef.current.container) {
+      viewRef.current.container.style.cursor = isSelecting
+        ? "crosshair"
+        : "default";
+    }
+  }, [onLocationSelect, isSelecting]);
 
   useEffect(() => {
     if (!mapRef.current) return;
 
-    Config.apiKey = process.env.NEXT_PUBLIC_ARCGIS_API_KEY;
+    // If view already exists, don't create another
+    if (viewRef.current) return;
 
-    const map = new Map({
-      basemap: "streets-vector"
-    });
+    let cancelled = false;
 
-    const view = new MapView({
-      container: mapRef.current,
-      map,
-      center: center || [25.0, 46.0],
-      zoom: center? 12 : 6
-    });
+    const initMap = async () => {
+      // Dynamic imports to avoid SSR issues
+      const [{ default: Map }] = await Promise.all([
+        import("@arcgis/core/Map"),
+      ]);
 
-    view.ui.remove("attribution");
+      if (cancelled) return;
 
-    // Add layer for selected marker
-    const graphicsLayer = new GraphicsLayer();
-    map.add(graphicsLayer);
+      const map = new Map({
+        basemap: "streets-vector",
+      });
 
-    if (onLocationSelect) {
+      const view = new MapView({
+        container: mapRef.current!,
+        map,
+        center: center || [25.0, 46.0],
+        zoom: center ? 12 : 6,
+      });
+
+      viewRef.current = view;
+
+      // Wait for view to be ready
+      await view.when();
+
+      if (cancelled) {
+        view.destroy();
+        return;
+      }
+
+      view.ui.remove("attribution");
+
+      // Set initial cursor
+      if (view.container) {
+        view.container.style.cursor = isSelectingRef.current
+          ? "crosshair"
+          : "default";
+      }
+
+      // Add layer for selected marker
+      const graphicsLayer = new GraphicsLayer();
+      map.add(graphicsLayer);
+
       view.on("click", (event) => {
+        // Only proceed if we are in selecting mode and have a callback
+        if (!isSelectingRef.current || !onLocationSelectRef.current) return;
+
         graphicsLayer.removeAll();
 
         const point = event.mapPoint;
-        
+
         const simpleMarkerSymbol = {
           type: "simple-marker" as const,
           color: [226, 119, 40],
           outline: {
             color: [255, 255, 255],
-            width: 1
-          }
+            width: 1,
+          },
         };
 
         const pointGraphic = new Graphic({
           geometry: point,
-          symbol: simpleMarkerSymbol
+          symbol: simpleMarkerSymbol,
         });
 
         graphicsLayer.add(pointGraphic);
 
-        onLocationSelect({
+        onLocationSelectRef.current({
           latitude: point.latitude,
-          longitude: point.longitude
+          longitude: point.longitude,
         });
       });
-    }
+    };
+
+    initMap().catch((err) => {
+      // Ignore abort errors - they're expected during cleanup
+      if (err?.name !== "AbortError") {
+        console.error("Map init error:", err);
+      }
+    });
 
     return () => {
-      view.destroy();
+      cancelled = true;
+      if (viewRef.current) {
+        viewRef.current.destroy();
+        viewRef.current = null;
+      }
     };
+  }, []);
+
+  // Handle center changes separately
+  useEffect(() => {
+    if (viewRef.current && center) {
+      viewRef.current.goTo({
+        center: center,
+        zoom: 12,
+      });
+    }
   }, [center]);
 
   return (
     <div
       ref={mapRef}
-      style={{ width: "100%", height: "600px", borderRadius: "12px" }}
+      className={className}
+      style={{ width: "100%", height: "100%", borderRadius: "0" }}
     ></div>
   );
 }
