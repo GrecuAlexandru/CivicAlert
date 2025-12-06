@@ -42,6 +42,24 @@ export default function ArcgisMap({
     }
   }, [onLocationSelect, isSelecting]);
 
+  // Update view center when center prop changes
+  useEffect(() => {
+    if (viewRef.current && center) {
+      viewRef.current
+        .goTo({
+          center: center,
+          zoom: 12,
+        })
+        .catch((error: any) => {
+          // Ignore interruption errors which happen if the user interacts with the map
+          // while it's animating or if another goTo call replaces this one
+          if (error.name !== "view:goto-interrupted") {
+            console.error("Map center update failed:", error);
+          }
+        });
+    }
+  }, [center]);
+
   useEffect(() => {
     if (!mapRef.current) return;
 

@@ -61,6 +61,7 @@ export default function Home() {
   const { user } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [userPhoto, setUserPhoto] = useState<string | null>(null);
+  const [mapCenter, setMapCenter] = useState<number[] | undefined>(undefined);
 
   // Reporting State
   const [isReporting, setIsReporting] = useState(false);
@@ -104,6 +105,14 @@ export default function Home() {
               console.log("User has no home city, triggering setup");
               setIsSettingLocation(true);
               setSidebarOpen(false);
+            } else if (
+              data.homeCity &&
+              typeof data.homeCity === "object" &&
+              data.homeCity.latitude &&
+              data.homeCity.longitude
+            ) {
+              // Set map center to user's home city
+              setMapCenter([data.homeCity.longitude, data.homeCity.latitude]);
             }
           }
         } catch (error) {
@@ -463,6 +472,7 @@ export default function Home() {
             className="h-full w-full"
             isSelecting={isReporting || isSettingLocation}
             onLocationSelect={handleLocationSelect}
+            center={mapCenter}
           />
         </div>
       </main>
