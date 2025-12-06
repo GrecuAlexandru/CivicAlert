@@ -48,6 +48,7 @@ import {
   doc,
   getDoc,
   addDoc,
+  updateDoc,
   collection,
   serverTimestamp,
   GeoPoint,
@@ -69,6 +70,11 @@ export default function Home() {
   } | null>(null);
   const [reportModalOpen, setReportModalOpen] = useState(false);
 
+  // Location Setting State
+  const [isSettingLocation, setIsSettingLocation] = useState(false);
+  const [locationModalOpen, setLocationModalOpen] = useState(false);
+  const [cityName, setCityName] = useState("");
+
   // Form State
   const [title, setTitle] = useState("");
   const [category, setCategory] = useState("");
@@ -85,6 +91,19 @@ export default function Home() {
             const data = userDoc.data();
             if (data.photoUrl) {
               setUserPhoto(data.photoUrl);
+            }
+
+            // Check if homeCity is missing or empty (handles both string and object formats)
+            const hasHomeCity =
+              data.homeCity &&
+              (typeof data.homeCity === "string"
+                ? data.homeCity.length > 0
+                : data.homeCity.name?.length > 0);
+
+            if (!hasHomeCity) {
+              console.log("User has no home city, triggering setup");
+              setIsSettingLocation(true);
+              setSidebarOpen(false);
             }
           }
         } catch (error) {
@@ -105,14 +124,39 @@ export default function Home() {
     longitude: number;
   }) => {
     setReportLocation(coords);
-    setIsReporting(false);
-    setReportModalOpen(true);
-    setSidebarOpen(true); // Re-open sidebar
+
+    if (isReporting) {
+      setIsReporting(false);
+      setReportModalOpen(true);
+      setSidebarOpen(true);
+    } else if (isSettingLocation) {
+      setIsSettingLocation(false);
+      setLocationModalOpen(true);
+    }
   };
 
   const handleCancelReporting = () => {
     setIsReporting(false);
     setSidebarOpen(true);
+  };
+
+  const handleSaveLocation = async () => {
+    if (!user || !reportLocation || !cityName) return;
+
+    try {
+      await updateDoc(doc(db, "users", user.uid), {
+        homeCity: {
+          name: cityName,
+          latitude: reportLocation.latitude,
+          longitude: reportLocation.longitude,
+        },
+      });
+      setLocationModalOpen(false);
+      setSidebarOpen(true);
+      console.log("Home location set successfully");
+    } catch (error) {
+      console.error("Error setting home location:", error);
+    }
   };
 
   const handleSubmitReport = async () => {
@@ -394,14 +438,22 @@ export default function Home() {
         </div>
 
         {/* Reporting Overlay Instructions */}
-        {isReporting && (
+        {(isReporting || isSettingLocation) && (
           <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 bg-background/90 backdrop-blur-sm p-4 rounded-lg shadow-lg border flex flex-col items-center gap-2 animate-in fade-in slide-in-from-top-4">
             <p className="font-semibold">
-              Click on the map to select the incident location
+              {isSettingLocation
+                ? "Click on the map to set your home location"
+                : "Click on the map to select the incident location"}
             </p>
-            <Button variant="outline" size="sm" onClick={handleCancelReporting}>
-              Cancel
-            </Button>
+            {isReporting && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleCancelReporting}
+              >
+                Cancel
+              </Button>
+            )}
           </div>
         )}
 
@@ -409,7 +461,7 @@ export default function Home() {
         <div className="h-full w-full">
           <MapWrapper
             className="h-full w-full"
-            isSelecting={isReporting}
+            isSelecting={isReporting || isSettingLocation}
             onLocationSelect={handleLocationSelect}
           />
         </div>
@@ -498,6 +550,41 @@ export default function Home() {
             </Button>
             <Button onClick={handleSubmitReport} disabled={isSubmitting}>
               {isSubmitting ? "Submitting..." : "Submit Report"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Set Location Modal */}
+      <Dialog open={locationModalOpen} onOpenChange={setLocationModalOpen}>
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle>Set Home Location</DialogTitle>
+            <DialogDescription>
+              Please name your selected location to finish setting up your
+              profile.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="cityName">City / Location Name</Label>
+              <Input
+                id="cityName"
+                placeholder="e.g., Bucharest, Home"
+                value={cityName}
+                onChange={(e) => setCityName(e.target.value)}
+              />
+            </div>
+            {reportLocation && (
+              <div className="text-xs text-muted-foreground">
+                Coordinates: {reportLocation.latitude.toFixed(6)},{" "}
+                {reportLocation.longitude.toFixed(6)}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button onClick={handleSaveLocation} disabled={!cityName}>
+              Save Location
             </Button>
           </DialogFooter>
         </DialogContent>
