@@ -42,6 +42,7 @@ import {
   X,
   ArrowUpDown,
   Camera,
+  ImageIcon,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -51,17 +52,74 @@ import {
   updateDoc,
   collection,
   serverTimestamp,
+  query,
+  orderBy,
+  onSnapshot,
   GeoPoint,
 } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db, storage } from "@/lib/firebase";
 import { v4 as uuidv4 } from "uuid";
 
+interface Ticket {
+  id: string;
+  userId: string;
+  title?: string;
+  category: string;
+  description: string;
+  status: string;
+  location: {
+    latitude: number;
+    longitude: number;
+  };
+  imageUrls: string[];
+  votes: string[];
+  createdAt: any;
+}
+
+// Haversine distance to calculate the distance between 2 points for displaying nearby tickets
+function getDistanceFromLatLonInKm(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number
+) {
+  const R = 6371; // The radius of the Earth
+  const dLat = deg2rad(lat2 - lat1);
+  const dLon = deg2rad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(deg2rad(lat1)) *
+      Math.cos(deg2rad(lat2)) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+function deg2rad(deg: number) {
+  return deg * (Math.PI / 180);
+}
+
 export default function Home() {
   const { user } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [userPhoto, setUserPhoto] = useState<string | null>(null);
   const [mapCenter, setMapCenter] = useState<number[] | undefined>(undefined);
+
+  // Tickets and user data
+  const [userHomeLocation, setUserHomeLocation] = useState<{
+    latitude: number;
+    longitude: number;
+  } | null>(null);
+  const [tickets, setTickets] = useState<Ticket[]>([]);
+
+  // Selected ticket for displaying informations state
+  const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
+
+  // Filter state
+  const [activeTab, setActiveTab] = useState("all"); // 'all', 'mine', 'nearby'
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
 
   // Reporting State
   const [isReporting, setIsReporting] = useState(false);
@@ -111,8 +169,12 @@ export default function Home() {
               data.homeCity.latitude &&
               data.homeCity.longitude
             ) {
-              // Set map center to user's home city
+              // Set map center and user's home city
               setMapCenter([data.homeCity.longitude, data.homeCity.latitude]);
+              setUserHomeLocation({
+                latitude: data.homeCity.latitude,
+                longitude: data.homeCity.longitude,
+              });
             }
           }
         } catch (error) {
@@ -122,6 +184,18 @@ export default function Home() {
       fetchUserData();
     }
   }, [user]);
+
+  useEffect(() => {
+    const q = query(collection(db, "tickets"), orderBy("createdAt", "desc"));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const fetchedTickets = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+      })) as Ticket[];
+      setTickets(fetchedTickets);
+    });
+    return () => unsubscribe();
+  }, []);
 
   const handleStartReporting = () => {
     setIsReporting(true);
@@ -214,6 +288,56 @@ export default function Home() {
     }
   };
 
+  // Filter tickets
+  const getFilteredTickets = () => {
+    return tickets.filter((ticket) => {
+      let matchesTab = true;
+      if (activeTab === "mine") {
+        matchesTab = user ? ticket.userId === user.uid : false;
+      } else if (activeTab === "nearby") {
+        if (!userHomeLocation) matchesTab = true; 
+        else {
+          const dist = getDistanceFromLatLonInKm(
+            userHomeLocation.latitude,
+            userHomeLocation.longitude,
+            ticket.location.latitude,
+            ticket.location.longitude
+          );
+          matchesTab = dist <= 10;
+        }
+      }
+
+      let matchesCategory = true;
+      if (selectedCategory) {
+        matchesCategory = ticket.category === selectedCategory;
+      }
+
+      return matchesTab && matchesCategory;
+    });
+  };
+
+  const filteredTickets = getFilteredTickets();
+
+  const toggleCategory = (cat: string) => {
+    if (selectedCategory === cat) setSelectedCategory(null);
+    else setSelectedCategory(cat);
+  };
+
+  const handleTicketClick = (ticket: Ticket) => {
+    if (selectedTicket?.id === ticket.id) {
+      // If the ticket is already selected, deselect the ticket
+      setSelectedTicket(null);
+    } else {
+      setSelectedTicket(ticket);
+      setMapCenter([ticket.location.longitude, ticket.location.latitude]);
+
+      // For mobile usage, close the menu with the tickets
+      if (window.innerWidth < 768) {
+        setSidebarOpen(false);
+      }
+    }
+  };
+
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background relative">
       {/* Sidebar */}
@@ -270,7 +394,7 @@ export default function Home() {
             <Input placeholder="Search incidents..." className="pl-9" />
           </div>
 
-          <Tabs defaultValue="all" className="w-full">
+          <Tabs defaultValue="all" className="w-full" onValueChange={setActiveTab}>
             <TabsList className="w-full grid grid-cols-3">
               <TabsTrigger value="all">All</TabsTrigger>
               <TabsTrigger value="mine">Mine</TabsTrigger>
@@ -281,20 +405,23 @@ export default function Home() {
           <div className="flex items-center justify-between gap-2">
             <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide flex-1">
               <Badge
-                variant="secondary"
-                className="cursor-pointer whitespace-nowrap hover:bg-secondary/80"
+                variant={selectedCategory === "infrastructure" ? "secondary" : "outline"}
+                className="cursor-pointer whitespace-nowrap"
+                onClick={() => toggleCategory("infrastructure")}
               >
                 Infrastructure
               </Badge>
               <Badge
-                variant="outline"
-                className="cursor-pointer whitespace-nowrap hover:bg-accent"
+                variant={selectedCategory === "safety" ? "secondary" : "outline"}
+                className="cursor-pointer whitespace-nowrap"
+                onClick={() => toggleCategory("safety")}
               >
                 Safety
               </Badge>
               <Badge
-                variant="outline"
-                className="cursor-pointer whitespace-nowrap hover:bg-accent"
+                variant={selectedCategory === "environment" ? "secondary" : "outline"}
+                className="cursor-pointer whitespace-nowrap"
+                onClick={() => toggleCategory("environment")}
               >
                 Environment
               </Badge>
@@ -317,103 +444,70 @@ export default function Home() {
 
         {/* Ticket List */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-muted/20">
-          {/* Placeholder for tickets */}
-          <Card className="cursor-pointer hover:shadow-md transition-shadow border-l-4 border-l-blue-500">
-            <CardContent className="p-4 space-y-3">
-              <div className="flex justify-between items-start">
-                <Badge
-                  variant="secondary"
-                  className="bg-blue-100 text-blue-700 hover:bg-blue-200"
-                >
-                  Infrastructure
-                </Badge>
-                <span className="text-xs text-muted-foreground">2h ago</span>
-              </div>
-              <h3 className="font-semibold">Pothole on Main Street</h3>
-              <p className="text-sm text-muted-foreground line-clamp-2">
-                Large pothole causing traffic slowdown near the central park
-                entrance.
-              </p>
-              <div className="flex items-center justify-between pt-2">
-                <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                  <div className="flex items-center gap-1 hover:text-primary transition-colors">
-                    <ThumbsUp className="h-3 w-3" /> 12
+          {filteredTickets.length === 0 ? (
+             <div className="text-center py-10 text-muted-foreground">
+             <p>No tickets found.</p>
+           </div>
+          ) : (
+            filteredTickets.map((ticket) => (
+              <Card 
+                key={ticket.id}
+                onClick={() => handleTicketClick(ticket)}
+                className={`cursor-pointer hover:shadow-lg transition-all duration-200 border overflow-hidden group ${
+                  selectedTicket?.id === ticket.id ? "ring-2 ring-black border-transparent" : ""
+                }`}
+              >
+                {/* Ticket image */}
+                {ticket.imageUrls && ticket.imageUrls.length > 0 && (
+                  <div className="relative h-40 w-full overflow-hidden bg-muted">
+                    <img 
+                      src={ticket.imageUrls[0]} 
+                      alt="Ticket evidence" 
+                      className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                    />
+                    <div className="absolute top-2 right-2 bg-black/60 text-white text-xs px-2 py-1 rounded-full flex items-center gap-1">
+                      <ImageIcon className="h-3 w-3" />
+                      {ticket.imageUrls.length}
+                    </div>
                   </div>
-                  <div className="flex items-center gap-1 hover:text-primary transition-colors">
-                    <MessageSquare className="h-3 w-3" /> 5
-                  </div>
-                </div>
-                <Badge variant="outline" className="text-xs font-normal">
-                  Pending
-                </Badge>
-              </div>
-            </CardContent>
-          </Card>
+                )}
 
-          <Card className="cursor-pointer hover:shadow-md transition-shadow border-l-4 border-l-red-500">
-            <CardContent className="p-4 space-y-3">
-              <div className="flex justify-between items-start">
-                <Badge
-                  variant="secondary"
-                  className="bg-red-100 text-red-700 hover:bg-red-200"
-                >
-                  Public Safety
-                </Badge>
-                <span className="text-xs text-muted-foreground">5h ago</span>
-              </div>
-              <h3 className="font-semibold">Broken Street Light</h3>
-              <p className="text-sm text-muted-foreground line-clamp-2">
-                Street light completely out at the intersection of 5th and Elm.
-              </p>
-              <div className="flex items-center justify-between pt-2">
-                <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                  <div className="flex items-center gap-1 hover:text-primary transition-colors">
-                    <ThumbsUp className="h-3 w-3" /> 8
+                <CardContent className="p-4 space-y-3">
+                  <div className="flex justify-between items-start">
+                    <Badge variant="secondary">
+                      {ticket.category.charAt(0).toUpperCase() + ticket.category.slice(1)}
+                    </Badge>
+                    <span className="text-xs text-muted-foreground">
+                      {ticket.createdAt?.toDate ? ticket.createdAt.toDate().toLocaleDateString() : 'Recent'}
+                    </span>
                   </div>
-                  <div className="flex items-center gap-1 hover:text-primary transition-colors">
-                    <MessageSquare className="h-3 w-3" /> 2
+                  
+                  <div>
+                    <h3 className="font-semibold text-lg leading-tight mb-1">
+                      {ticket.title || "Incident Reported"}
+                    </h3>
+                    <p className="text-sm text-muted-foreground line-clamp-2">
+                      {ticket.description}
+                    </p>
                   </div>
-                </div>
-                <Badge variant="outline" className="text-xs font-normal">
-                  In Progress
-                </Badge>
-              </div>
-            </CardContent>
-          </Card>
 
-          <Card className="cursor-pointer hover:shadow-md transition-shadow border-l-4 border-l-green-500 opacity-75">
-            <CardContent className="p-4 space-y-3">
-              <div className="flex justify-between items-start">
-                <Badge
-                  variant="secondary"
-                  className="bg-green-100 text-green-700 hover:bg-green-200"
-                >
-                  Environment
-                </Badge>
-                <span className="text-xs text-muted-foreground">1d ago</span>
-              </div>
-              <h3 className="font-semibold">Fallen Tree Branch</h3>
-              <p className="text-sm text-muted-foreground line-clamp-2">
-                Branch blocking the sidewalk on Oak Avenue.
-              </p>
-              <div className="flex items-center justify-between pt-2">
-                <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                  <div className="flex items-center gap-1 hover:text-primary transition-colors">
-                    <ThumbsUp className="h-3 w-3" /> 24
+                  <div className="flex items-center justify-between pt-2 border-t mt-2">
+                    <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                      <div className="flex items-center gap-1 hover:text-primary transition-colors">
+                        <ThumbsUp className="h-3 w-3" /> {ticket.votes?.length || 0}
+                      </div>
+                      <div className="flex items-center gap-1 hover:text-primary transition-colors">
+                        <MessageSquare className="h-3 w-3" /> 0
+                      </div>
+                    </div>
+                    <Badge variant="outline" className="text-xs font-normal">
+                      {ticket.status}
+                    </Badge>
                   </div>
-                  <div className="flex items-center gap-1 hover:text-primary transition-colors">
-                    <MessageSquare className="h-3 w-3" /> 8
-                  </div>
-                </div>
-                <Badge
-                  variant="outline"
-                  className="text-xs font-normal bg-green-50 text-green-700 border-green-200"
-                >
-                  Resolved
-                </Badge>
-              </div>
-            </CardContent>
-          </Card>
+                </CardContent>
+              </Card>
+            ))
+          )}
         </div>
 
         {/* Footer Actions */}
