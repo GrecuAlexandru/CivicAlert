@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
@@ -119,4 +120,33 @@
   body {
     @apply bg-background text-foreground;
   }
+}
+
+/* ArcGIS Map Popup Overrides */
+.esri-popup__main-container {
+  width: auto !important;
+  max-width: 250px !important;
+  padding: 0 !important;
+  border-radius: 8px !important;
+  box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1) !important;
+}
+
+.esri-popup__content {
+  margin: 0 !important;
+  padding: 8px !important;
+}
+
+/* Hide header completely to remove Zoom To and Title bar */
+.esri-popup__header {
+  display: none !important;
+}
+
+/* Hide footer (where actions usually live if docked) */
+.esri-popup__footer {
+  display: none !important;
+}
+
+/* Ensure the pointer (triangle) still looks okay or hide it if desired */
+.esri-popup__pointer {
+  display: block; 
 }

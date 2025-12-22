@@ -138,8 +138,16 @@ export default function Home() {
   const [title, setTitle] = useState("");
   const [category, setCategory] = useState("");
   const [description, setDescription] = useState("");
-  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [photoFiles, setPhotoFiles] = useState<File[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  // If user signs out, reset tab to All to avoid gated views
+  useEffect(() => {
+    if (!user && activeTab !== "all") {
+      setActiveTab("all");
+    }
+  }, [user, activeTab]);
 
   useEffect(() => {
     if (user) {
@@ -185,6 +193,7 @@ export default function Home() {
     }
   }, [user]);
 
+  // Fetch tickets
   useEffect(() => {
     const q = query(collection(db, "tickets"), orderBy("createdAt", "desc"));
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -243,18 +252,42 @@ export default function Home() {
   };
 
   const handleSubmitReport = async () => {
-    if (!user || !reportLocation || !category) return;
+    if (!user) {
+      setFormError("Please sign in to submit a report.");
+      return;
+    }
+
+    if (!reportLocation) {
+      setFormError("Select a location on the map first.");
+      return;
+    }
+
+    if (!category) {
+      setFormError("Select a category to continue.");
+      return;
+    }
+
+    if (!description.trim()) {
+      setFormError("Add a short description of the issue.");
+      return;
+    }
+
+    setFormError(null);
 
     setIsSubmitting(true);
 
     try {
       const imageUrls: string[] = [];
 
-      if (photoFile) {
-        const imageRef = ref(storage, `ticket-images/${uuidv4()}`);
-        await uploadBytes(imageRef, photoFile);
-        const url = await getDownloadURL(imageRef);
-        imageUrls.push(url);
+      if (photoFiles.length > 0) {
+        await Promise.all(
+          photoFiles.map(async (file) => {
+             const imageRef = ref(storage, `ticket-images/${uuidv4()}`);
+             await uploadBytes(imageRef, file);
+             const url = await getDownloadURL(imageRef);
+             imageUrls.push(url);
+          })
+        );
       }
 
       await addDoc(collection(db, "tickets"), {
@@ -276,13 +309,17 @@ export default function Home() {
       setTitle("");
       setCategory("");
       setDescription("");
-      setPhotoFile(null);
+      setPhotoFiles([]);
       setReportModalOpen(false);
+
+      // Keep location selection for future submissions
+      setReportLocation(null);
 
       // Ideally show a success toast here
       console.log("Ticket reported successfully");
     } catch (error) {
       console.error("Error reporting ticket:", error);
+      setFormError("Could not submit the report. Please try again.");
     } finally {
       setIsSubmitting(false);
     }
@@ -330,11 +367,6 @@ export default function Home() {
     } else {
       setSelectedTicket(ticket);
       setMapCenter([ticket.location.longitude, ticket.location.latitude]);
-
-      // For mobile usage, close the menu with the tickets
-      if (window.innerWidth < 768) {
-        setSidebarOpen(false);
-      }
     }
   };
 
@@ -394,11 +426,11 @@ export default function Home() {
             <Input placeholder="Search incidents..." className="pl-9" />
           </div>
 
-          <Tabs defaultValue="all" className="w-full" onValueChange={setActiveTab}>
-            <TabsList className="w-full grid grid-cols-3">
+          <Tabs defaultValue="all" value={activeTab} className="w-full" onValueChange={setActiveTab}>
+            <TabsList className={`w-full ${user ? "grid grid-cols-3" : "grid grid-cols-1"}`}>
               <TabsTrigger value="all">All</TabsTrigger>
-              <TabsTrigger value="mine">Mine</TabsTrigger>
-              <TabsTrigger value="nearby">Nearby</TabsTrigger>
+              {user && <TabsTrigger value="mine">Mine</TabsTrigger>}
+              {user && <TabsTrigger value="nearby">Nearby</TabsTrigger>}
             </TabsList>
           </Tabs>
 
@@ -460,9 +492,9 @@ export default function Home() {
                 {/* Ticket image */}
                 {ticket.imageUrls && ticket.imageUrls.length > 0 && (
                   <div className="relative h-40 w-full overflow-hidden bg-muted">
-                    <img 
-                      src={ticket.imageUrls[0]} 
-                      alt="Ticket evidence" 
+                    <img
+                      src={ticket.imageUrls[0]}
+                      alt="Ticket evidence"
                       className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                     />
                     <div className="absolute top-2 right-2 bg-black/60 text-white text-xs px-2 py-1 rounded-full flex items-center gap-1">
@@ -481,7 +513,7 @@ export default function Home() {
                       {ticket.createdAt?.toDate ? ticket.createdAt.toDate().toLocaleDateString() : 'Recent'}
                     </span>
                   </div>
-                  
+
                   <div>
                     <h3 className="font-semibold text-lg leading-tight mb-1">
                       {ticket.title || "Incident Reported"}
@@ -512,13 +544,21 @@ export default function Home() {
 
         {/* Footer Actions */}
         <div className="p-4 border-t bg-card shrink-0">
-          <Button
-            className="w-full gap-2 shadow-lg hover:shadow-xl transition-all"
-            size="lg"
-            onClick={handleStartReporting}
-          >
-            <Plus className="h-5 w-5" /> Report New Incident
-          </Button>
+          {user ? (
+            <Button
+              className="w-full gap-2 shadow-lg hover:shadow-xl transition-all"
+              size="lg"
+              onClick={handleStartReporting}
+            >
+              <Plus className="h-5 w-5" /> Report New Incident
+            </Button>
+          ) : (
+            <Link href="/login">
+              <Button className="w-full gap-2" size="lg" variant="outline">
+                <Plus className="h-5 w-5" /> Sign in to report
+              </Button>
+            </Link>
+          )}
         </div>
       </aside>
 
@@ -567,6 +607,9 @@ export default function Home() {
             isSelecting={isReporting || isSettingLocation}
             onLocationSelect={handleLocationSelect}
             center={mapCenter}
+            tickets={tickets}
+            userHomeLocation={userHomeLocation}
+            selectedTicketId={selectedTicket?.id}
           />
         </div>
       </main>
@@ -620,10 +663,11 @@ export default function Home() {
                   id="photos"
                   type="file"
                   accept="image/*"
+                  multiple
                   className="hidden"
                   onChange={(e) => {
-                    if (e.target.files && e.target.files[0]) {
-                      setPhotoFile(e.target.files[0]);
+                    if (e.target.files) {
+                      setPhotoFiles(Array.from(e.target.files));
                     }
                   }}
                 />
@@ -633,7 +677,9 @@ export default function Home() {
                   onClick={() => document.getElementById("photos")?.click()}
                 >
                   <Camera className="mr-2 h-4 w-4" />{" "}
-                  {photoFile ? "Photo Selected" : "Upload Photo"}
+                  {photoFiles.length > 0 
+                    ? `${photoFiles.length} Photo${photoFiles.length > 1 ? 's' : ''} Selected` 
+                    : "Upload Photos"}
                 </Button>
               </div>
             </div>
@@ -642,6 +688,12 @@ export default function Home() {
                 Location selected: {reportLocation.latitude.toFixed(6)},{" "}
                 {reportLocation.longitude.toFixed(6)}
               </div>
+            )}
+
+            {formError && (
+              <p className="text-sm text-destructive" role="alert">
+                {formError}
+              </p>
             )}
           </div>
           <DialogFooter>
@@ -652,7 +704,15 @@ export default function Home() {
             >
               Cancel
             </Button>
-            <Button onClick={handleSubmitReport} disabled={isSubmitting}>
+            <Button
+              onClick={handleSubmitReport}
+              disabled={
+                isSubmitting ||
+                !category ||
+                !description.trim() ||
+                !reportLocation
+              }
+            >
               {isSubmitting ? "Submitting..." : "Submit Report"}
             </Button>
           </DialogFooter>
