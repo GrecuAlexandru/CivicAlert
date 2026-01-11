@@ -10,7 +10,6 @@ import "@arcgis/core/assets/esri/themes/light/main.css";
 import { Ticket } from "@/app/types";
 import { getPopupContent } from "./PopupContent";
 
-
 interface ArcgisMapProps {
   center?: number[];
   onLocationSelect?: (coords: { latitude: number; longitude: number }) => void;
@@ -67,7 +66,8 @@ export default function ArcgisMap({
 
   // Handle auto-popup when selectedTicketId changes
   useEffect(() => {
-    if (!selectedTicketId || !viewRef.current || !graphicsLayerRef.current) return;
+    if (!selectedTicketId || !viewRef.current || !graphicsLayerRef.current)
+      return;
 
     const graphic = graphicsLayerRef.current.graphics.find(
       (g) => g.attributes?.id === selectedTicketId
@@ -83,11 +83,9 @@ export default function ArcgisMap({
     }
   }, [selectedTicketId]);
 
-
-
   const updateGraphics = (layer: GraphicsLayer) => {
     if (!layer) return;
-    
+
     layer.removeAll();
 
     // Add Home Graphic
@@ -227,6 +225,8 @@ export default function ArcgisMap({
       }
 
       view.ui.remove("attribution");
+      // Move zoom to bottom left
+      view.ui.move("zoom", "bottom-left");
       // Remove default actions
       view.popup?.actions.removeAll();
 
@@ -247,87 +247,94 @@ export default function ArcgisMap({
       view.on("click", async (event) => {
         // Selection mode takes precedence
         if (isSelectingRef.current && onLocationSelectRef.current) {
-             // Handled by selectionLayer click below
+          // Handled by selectionLayer click below
         } else {
-             // Normal mode: check for ticket clicks
-             const response = await view.hitTest(event);
-             const graphicHit = response.results.find(
-               (result) => result.type === "graphic" && result.graphic.attributes?.type === "ticket"
-             ) as __esri.GraphicHit | undefined;
-             
-             const graphic = graphicHit?.graphic;
-             
-             if (graphic && graphic.attributes?.id) {
-               router.push(`/ticket/${graphic.attributes.id}`);
-             }
+          // Normal mode: check for ticket clicks
+          const response = await view.hitTest(event);
+          const graphicHit = response.results.find(
+            (result) =>
+              result.type === "graphic" &&
+              result.graphic.attributes?.type === "ticket"
+          ) as __esri.GraphicHit | undefined;
+
+          const graphic = graphicHit?.graphic;
+
+          if (graphic && graphic.attributes?.id) {
+            router.push(`/ticket/${graphic.attributes.id}`);
+          }
         }
       });
-      
+
       const selectionLayer = new GraphicsLayer();
       map.add(selectionLayer);
 
       view.on("click", async (event) => {
         if (isSelectingRef.current && onLocationSelectRef.current) {
           selectionLayer.removeAll();
-          
+
           const point = event.mapPoint;
           const simpleMarkerSymbol = {
-             type: "simple-marker",
-             color: [226, 119, 40],
-             outline: { color: [255, 255, 255], width: 1 }
+            type: "simple-marker",
+            color: [226, 119, 40],
+            outline: { color: [255, 255, 255], width: 1 },
           } as any;
-          
+
           const pointGraphic = new Graphic({
             geometry: point,
-            symbol: simpleMarkerSymbol
+            symbol: simpleMarkerSymbol,
           });
-          
+
           selectionLayer.add(pointGraphic);
           onLocationSelectRef.current({
             latitude: point.latitude,
-            longitude: point.longitude
+            longitude: point.longitude,
           });
         }
       });
-       
-       // Hover handling
-       view.on("pointer-move", async (event) => {
-         if (isSelectingRef.current || !view.popup) return;
-         
-         const response = await view.hitTest(event);
-         const graphicHit = response.results.find(
-           (result) => result.type === "graphic" && result.graphic.attributes?.type === "ticket"
-         ) as __esri.GraphicHit | undefined;
-         
-         const graphic = graphicHit?.graphic;
-         
-         // Highlight fix: Flicker prevention logic
-         if (graphic) {
-           const id = graphic.attributes.id;
 
-           if (lastHoveredId.current === id && view.popup && view.popup.visible) {
-             return;
-           }
+      // Hover handling
+      view.on("pointer-move", async (event) => {
+        if (isSelectingRef.current || !view.popup) return;
 
-           lastHoveredId.current = id;
-           if (view.container) view.container.style.cursor = "pointer";
-           
-           if (view.popup) {
-             view.popup.open({
-               features: [graphic],
-               // Highlight fix: Location anchor
-               location: graphic.geometry as any,
-             });
-           }
-         } else {
-           if (lastHoveredId.current) {
-             lastHoveredId.current = null;
-             if (view.container) view.container.style.cursor = "default";
-             if (view.popup) view.popup.close();
-           }
-         }
-       });
+        const response = await view.hitTest(event);
+        const graphicHit = response.results.find(
+          (result) =>
+            result.type === "graphic" &&
+            result.graphic.attributes?.type === "ticket"
+        ) as __esri.GraphicHit | undefined;
 
+        const graphic = graphicHit?.graphic;
+
+        // Highlight fix: Flicker prevention logic
+        if (graphic) {
+          const id = graphic.attributes.id;
+
+          if (
+            lastHoveredId.current === id &&
+            view.popup &&
+            view.popup.visible
+          ) {
+            return;
+          }
+
+          lastHoveredId.current = id;
+          if (view.container) view.container.style.cursor = "pointer";
+
+          if (view.popup) {
+            view.popup.open({
+              features: [graphic],
+              // Highlight fix: Location anchor
+              location: graphic.geometry as any,
+            });
+          }
+        } else {
+          if (lastHoveredId.current) {
+            lastHoveredId.current = null;
+            if (view.container) view.container.style.cursor = "default";
+            if (view.popup) view.popup.close();
+          }
+        }
+      });
     };
 
     initMap().catch((err) => {

@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useEffect, use } from "react";
+import { useState, useEffect } from "react";
 import MapWrapper from "@/app/map/map-wrapper";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -44,7 +44,7 @@ import {
   ArrowUpDown,
   Camera,
   ImageIcon,
-  Send
+  Send,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -57,13 +57,15 @@ import {
   query,
   orderBy,
   onSnapshot,
-  GeoPoint,
   arrayUnion,
-  arrayRemove
+  arrayRemove,
+  Timestamp,
 } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db, storage } from "@/lib/firebase";
 import { v4 as uuidv4 } from "uuid";
+import { NotificationBell } from "@/components/NotificationBell";
+import { notifyNewComment } from "@/lib/notifications";
 
 interface Ticket {
   id: string;
@@ -79,7 +81,7 @@ interface Ticket {
   imageUrls: string[];
   likes: string[];
   dislikes: string[];
-  createdAt: any;
+  createdAt: Timestamp;
 }
 
 interface Comment {
@@ -89,7 +91,7 @@ interface Comment {
   userAvatar?: string;
   text: string;
   imageUrl?: string;
-  createdAt: any;
+  createdAt: Timestamp;
 }
 
 // Haversine distance to calculate the distance between 2 points for displaying nearby tickets
@@ -158,7 +160,8 @@ export default function Home() {
   const [formError, setFormError] = useState<string | null>(null);
 
   // Comments States
-  const [viewingTicketForComments, setViewingTicketForComments] = useState<Ticket | null>(null);
+  const [viewingTicketForComments, setViewingTicketForComments] =
+    useState<Ticket | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
   const [newCommentText, setNewCommentText] = useState("");
   const [newCommentPhoto, setNewCommentPhoto] = useState<File | null>(null);
@@ -211,14 +214,13 @@ export default function Home() {
           }
 
           // Try to get the name of the user to use when sending comments
-          let userName = ""
+          let userName = "";
 
           if (!userName && user.email) {
-            userName = user.email.split('@')[0];
+            userName = user.email.split("@")[0];
           }
 
           setUserName(userName || "User");
-
         } catch (error) {
           console.error("Error fetching user data:", error);
         }
@@ -242,9 +244,15 @@ export default function Home() {
 
   useEffect(() => {
     if (viewingTicketForComments) {
-      const q = query(collection(db, "tickets", viewingTicketForComments.id, "comments"), orderBy("createdAt", "asc"));
+      const q = query(
+        collection(db, "tickets", viewingTicketForComments.id, "comments"),
+        orderBy("createdAt", "asc")
+      );
       const unsubscribe = onSnapshot(q, (snapshot) => {
-        const fetchedComments = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Comment[];
+        const fetchedComments = snapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        })) as Comment[];
         setComments(fetchedComments);
       });
       return () => unsubscribe();
@@ -253,25 +261,35 @@ export default function Home() {
     }
   }, [viewingTicketForComments]);
 
-  const handleVote = async (e: React.MouseEvent, ticket: Ticket, type: 'like' | 'dislike') => {
-    e.stopPropagation(); 
+  const handleVote = async (
+    e: React.MouseEvent,
+    ticket: Ticket,
+    type: "like" | "dislike"
+  ) => {
+    e.stopPropagation();
     if (!user) return;
 
     const ticketRef = doc(db, "tickets", ticket.id);
     const uid = user.uid;
 
     try {
-      if (type === 'like') {
+      if (type === "like") {
         if (ticket.likes?.includes(uid)) {
           await updateDoc(ticketRef, { likes: arrayRemove(uid) });
         } else {
-          await updateDoc(ticketRef, { likes: arrayUnion(uid), dislikes: arrayRemove(uid) });
+          await updateDoc(ticketRef, {
+            likes: arrayUnion(uid),
+            dislikes: arrayRemove(uid),
+          });
         }
       } else {
         if (ticket.dislikes?.includes(uid)) {
           await updateDoc(ticketRef, { dislikes: arrayRemove(uid) });
         } else {
-          await updateDoc(ticketRef, { dislikes: arrayUnion(uid), likes: arrayRemove(uid) });
+          await updateDoc(ticketRef, {
+            dislikes: arrayUnion(uid),
+            likes: arrayRemove(uid),
+          });
         }
       }
     } catch (err) {
@@ -280,8 +298,13 @@ export default function Home() {
   };
 
   const handlePostComment = async () => {
-    if (!user || !viewingTicketForComments || (!newCommentText && !newCommentPhoto)) return;
-    
+    if (
+      !user ||
+      !viewingTicketForComments ||
+      (!newCommentText && !newCommentPhoto)
+    )
+      return;
+
     setIsSendingComment(true);
     try {
       let imageUrl = null;
@@ -291,14 +314,27 @@ export default function Home() {
         imageUrl = await getDownloadURL(imageRef);
       }
 
-      await addDoc(collection(db, "tickets", viewingTicketForComments.id, "comments"), {
-        userId: user.uid,
-        userName: userName || user.email?.split('@')[0] || "Anonymous",
-        userAvatar: userPhoto || user.photoURL,
-        text: newCommentText,
-        imageUrl: imageUrl,
-        createdAt: serverTimestamp()
-      });
+      await addDoc(
+        collection(db, "tickets", viewingTicketForComments.id, "comments"),
+        {
+          userId: user.uid,
+          userName: userName || user.email?.split("@")[0] || "Anonymous",
+          userAvatar: userPhoto || user.photoURL,
+          text: newCommentText,
+          imageUrl: imageUrl,
+          createdAt: serverTimestamp(),
+        }
+      );
+
+      // Notify ticket owner about the new comment
+      if (viewingTicketForComments.userId !== user.uid) {
+        await notifyNewComment({
+          ticketOwnerId: viewingTicketForComments.userId,
+          ticketId: viewingTicketForComments.id,
+          commenterName: userName || user.email?.split("@")[0] || "Someone",
+          commenterId: user.uid,
+        });
+      }
 
       setNewCommentText("");
       setNewCommentPhoto(null);
@@ -385,10 +421,10 @@ export default function Home() {
       if (photoFiles.length > 0) {
         await Promise.all(
           photoFiles.map(async (file) => {
-             const imageRef = ref(storage, `ticket-images/${uuidv4()}`);
-             await uploadBytes(imageRef, file);
-             const url = await getDownloadURL(imageRef);
-             imageUrls.push(url);
+            const imageRef = ref(storage, `ticket-images/${uuidv4()}`);
+            await uploadBytes(imageRef, file);
+            const url = await getDownloadURL(imageRef);
+            imageUrls.push(url);
           })
         );
       }
@@ -435,7 +471,7 @@ export default function Home() {
       if (activeTab === "mine") {
         matchesTab = user ? ticket.userId === user.uid : false;
       } else if (activeTab === "nearby") {
-        if (!userHomeLocation) matchesTab = true; 
+        if (!userHomeLocation) matchesTab = true;
         else {
           const dist = getDistanceFromLatLonInKm(
             userHomeLocation.latitude,
@@ -495,6 +531,7 @@ export default function Home() {
             <h1 className="text-xl font-bold text-foreground">CivicAlert</h1>
           </div>
           <div className="flex items-center gap-2">
+            {user && <NotificationBell />}
             {user ? (
               <Link href="/profile">
                 <Avatar className="h-8 w-8 cursor-pointer hover:opacity-80 transition ring-2 ring-background">
@@ -529,8 +566,17 @@ export default function Home() {
             <Input placeholder="Search incidents..." className="pl-9" />
           </div>
 
-          <Tabs defaultValue="all" value={activeTab} className="w-full" onValueChange={setActiveTab}>
-            <TabsList className={`w-full ${user ? "grid grid-cols-3" : "grid grid-cols-1"}`}>
+          <Tabs
+            defaultValue="all"
+            value={activeTab}
+            className="w-full"
+            onValueChange={setActiveTab}
+          >
+            <TabsList
+              className={`w-full ${
+                user ? "grid grid-cols-3" : "grid grid-cols-1"
+              }`}
+            >
               <TabsTrigger value="all">All</TabsTrigger>
               {user && <TabsTrigger value="mine">Mine</TabsTrigger>}
               {user && <TabsTrigger value="nearby">Nearby</TabsTrigger>}
@@ -540,21 +586,29 @@ export default function Home() {
           <div className="flex items-center justify-between gap-2">
             <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide flex-1">
               <Badge
-                variant={selectedCategory === "infrastructure" ? "secondary" : "outline"}
+                variant={
+                  selectedCategory === "infrastructure"
+                    ? "secondary"
+                    : "outline"
+                }
                 className="cursor-pointer whitespace-nowrap"
                 onClick={() => toggleCategory("infrastructure")}
               >
                 Infrastructure
               </Badge>
               <Badge
-                variant={selectedCategory === "safety" ? "secondary" : "outline"}
+                variant={
+                  selectedCategory === "safety" ? "secondary" : "outline"
+                }
                 className="cursor-pointer whitespace-nowrap"
                 onClick={() => toggleCategory("safety")}
               >
                 Safety
               </Badge>
               <Badge
-                variant={selectedCategory === "environment" ? "secondary" : "outline"}
+                variant={
+                  selectedCategory === "environment" ? "secondary" : "outline"
+                }
                 className="cursor-pointer whitespace-nowrap"
                 onClick={() => toggleCategory("environment")}
               >
@@ -580,16 +634,18 @@ export default function Home() {
         {/* Ticket List */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-muted/20">
           {filteredTickets.length === 0 ? (
-             <div className="text-center py-10 text-muted-foreground">
-             <p>No tickets found.</p>
-           </div>
+            <div className="text-center py-10 text-muted-foreground">
+              <p>No tickets found.</p>
+            </div>
           ) : (
             filteredTickets.map((ticket) => (
-              <Card 
+              <Card
                 key={ticket.id}
                 onClick={() => handleTicketClick(ticket)}
                 className={`cursor-pointer hover:shadow-lg transition-all duration-200 border overflow-hidden group ${
-                  selectedTicket?.id === ticket.id ? "ring-2 ring-black border-transparent" : ""
+                  selectedTicket?.id === ticket.id
+                    ? "ring-2 ring-black border-transparent"
+                    : ""
                 }`}
               >
                 {/* Ticket image */}
@@ -610,10 +666,13 @@ export default function Home() {
                 <CardContent className="p-4 space-y-3">
                   <div className="flex justify-between items-start">
                     <Badge variant="secondary">
-                      {ticket.category.charAt(0).toUpperCase() + ticket.category.slice(1)}
+                      {ticket.category.charAt(0).toUpperCase() +
+                        ticket.category.slice(1)}
                     </Badge>
                     <span className="text-xs text-muted-foreground">
-                      {ticket.createdAt?.toDate ? ticket.createdAt.toDate().toLocaleDateString() : 'Recent'}
+                      {ticket.createdAt?.toDate
+                        ? ticket.createdAt.toDate().toLocaleDateString()
+                        : "Recent"}
                     </span>
                   </div>
 
@@ -627,28 +686,34 @@ export default function Home() {
                   </div>
 
                   <div className="flex items-center justify-between pt-2 border-t mt-1">
-                    <div className="flex items-center gap-3 text-xs text-muted-foreground">                      
-                      <button 
-                        onClick={(e) => handleVote(e, ticket, 'like')} 
-                        className={`flex items-center gap-1 hover:text-green-600 transition-colors ${ticket.likes?.includes(user?.uid || "") ? "text-green-600 font-bold" : ""}`}
+                    <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                      <button
+                        onClick={(e) => handleVote(e, ticket, "like")}
+                        className={`flex items-center gap-1 hover:text-green-600 transition-colors ${
+                          ticket.likes?.includes(user?.uid || "")
+                            ? "text-green-600 font-bold"
+                            : ""
+                        }`}
                       >
-                        <ThumbsUp className="h-3 w-3" /> {ticket.likes?.length || 0}
+                        <ThumbsUp className="h-3 w-3" />{" "}
+                        {ticket.likes?.length || 0}
                       </button>
-                      <button 
-                        onClick={(e) => handleVote(e, ticket, 'dislike')} 
-                        className={`flex items-center gap-1 hover:text-red-600 transition-colors ${ticket.dislikes?.includes(user?.uid || "") ? "text-red-600 font-bold" : ""}`}
-                      >
-                        <ThumbsDown className="h-3 w-3 mt-0.5" /> {ticket.dislikes?.length || 0}
-                      </button>
-                      <button 
-                        onClick={(e) => { e.stopPropagation(); setViewingTicketForComments(ticket); }} 
+
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setViewingTicketForComments(ticket);
+                        }}
                         className="flex items-center gap-1 hover:text-blue-500 transition-colors"
                       >
                         <MessageSquare className="h-3 w-3" /> Comments
                       </button>
                     </div>
-                    
-                    <Badge variant="outline" className="text-[10px] font-normal px-1 py-0">
+
+                    <Badge
+                      variant="outline"
+                      className="text-[10px] font-normal px-1 py-0"
+                    >
                       {ticket.status}
                     </Badge>
                   </div>
@@ -793,8 +858,10 @@ export default function Home() {
                   onClick={() => document.getElementById("photos")?.click()}
                 >
                   <Camera className="mr-2 h-4 w-4" />{" "}
-                  {photoFiles.length > 0 
-                    ? `${photoFiles.length} Photo${photoFiles.length > 1 ? 's' : ''} Selected` 
+                  {photoFiles.length > 0
+                    ? `${photoFiles.length} Photo${
+                        photoFiles.length > 1 ? "s" : ""
+                      } Selected`
                     : "Upload Photos"}
                 </Button>
               </div>
@@ -871,40 +938,53 @@ export default function Home() {
       </Dialog>
 
       {/* Comments Modal */}
-      <Dialog open={!!viewingTicketForComments} onOpenChange={(open) => !open && setViewingTicketForComments(null)}>
+      <Dialog
+        open={!!viewingTicketForComments}
+        onOpenChange={(open) => !open && setViewingTicketForComments(null)}
+      >
         <DialogContent className="sm:max-w-[500px] h-[80vh] flex flex-col p-0 gap-0 overflow-hidden">
           <div className="p-4 border-b shrink-0 bg-background z-10">
             <DialogHeader>
-              <DialogTitle className="text-lg">{viewingTicketForComments?.title || "Incident Details"}</DialogTitle>
+              <DialogTitle className="text-lg">
+                {viewingTicketForComments?.title || "Incident Details"}
+              </DialogTitle>
               <DialogDescription className="text-xs line-clamp-2">
                 {viewingTicketForComments?.description}
               </DialogDescription>
             </DialogHeader>
           </div>
-          
+
           <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-muted/10">
             {comments.length === 0 ? (
-              <p className="text-center text-xs text-muted-foreground py-4">No comments yet.</p>
+              <p className="text-center text-xs text-muted-foreground py-4">
+                No comments yet.
+              </p>
             ) : (
               comments.map((c) => (
                 <div key={c.id} className="flex gap-2">
                   <Avatar className="h-6 w-6 mt-1">
                     <AvatarImage src={c.userAvatar} />
-                    <AvatarFallback>{c.userName?.charAt(0).toUpperCase()}</AvatarFallback>
+                    <AvatarFallback>
+                      {c.userName?.charAt(0).toUpperCase()}
+                    </AvatarFallback>
                   </Avatar>
                   <div className="bg-card border rounded-md p-2 shadow-sm text-sm flex-1">
                     <div className="flex justify-between items-center mb-1">
-                      <span className="font-semibold text-xs">{c.userName}</span>
+                      <span className="font-semibold text-xs">
+                        {c.userName}
+                      </span>
                       <span className="text-[10px] text-muted-foreground">
-                        {c.createdAt?.toDate ? c.createdAt.toDate().toLocaleString() : ""}
+                        {c.createdAt?.toDate
+                          ? c.createdAt.toDate().toLocaleString()
+                          : ""}
                       </span>
                     </div>
                     <p className="text-xs">{c.text}</p>
                     {c.imageUrl && (
-                      <img 
-                        src={c.imageUrl} 
-                        alt="Attachment" 
-                        className="mt-2 rounded-md max-h-32 border object-cover" 
+                      <img
+                        src={c.imageUrl}
+                        alt="Attachment"
+                        className="mt-2 rounded-md max-h-32 border object-cover"
                       />
                     )}
                   </div>
@@ -917,49 +997,58 @@ export default function Home() {
             {newCommentPhoto && (
               <div className="flex items-center gap-2 p-2 bg-muted rounded-md text-xs w-fit">
                 <ImageIcon className="h-3 w-3" />
-                <span className="truncate max-w-[150px]">{newCommentPhoto.name}</span>
-                <Button 
-                  variant="ghost" 
-                  size="icon" 
-                  className="h-4 w-4 ml-1 hover:bg-destructive/20" 
+                <span className="truncate max-w-[150px]">
+                  {newCommentPhoto.name}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-4 w-4 ml-1 hover:bg-destructive/20"
                   onClick={() => setNewCommentPhoto(null)}
                 >
                   <X className="h-3 w-3" />
                 </Button>
               </div>
             )}
-            
+
             <div className="flex gap-2 items-center">
-              <Button 
-                variant="ghost" 
-                size="icon" 
+              <Button
+                variant="ghost"
+                size="icon"
                 className="shrink-0"
-                onClick={() => document.getElementById("comment-photo-input")?.click()}
+                onClick={() =>
+                  document.getElementById("comment-photo-input")?.click()
+                }
               >
                 <Camera className="h-4 w-4" />
               </Button>
-              <Input 
-                id="comment-photo-input" 
-                type="file" 
-                accept="image/*" 
-                className="hidden" 
-                onChange={(e) => e.target.files?.[0] && setNewCommentPhoto(e.target.files[0])} 
+              <Input
+                id="comment-photo-input"
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) =>
+                  e.target.files?.[0] && setNewCommentPhoto(e.target.files[0])
+                }
               />
-              
-              <Input 
-                className="h-9 text-sm" 
-                placeholder="Write a comment..." 
-                value={newCommentText} 
-                onChange={(e) => setNewCommentText(e.target.value)} 
-                onKeyDown={(e) => e.key === 'Enter' && handlePostComment()} 
+
+              <Input
+                className="h-9 text-sm"
+                placeholder="Write a comment..."
+                value={newCommentText}
+                onChange={(e) => setNewCommentText(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handlePostComment()}
                 disabled={isSendingComment}
               />
-              
-              <Button 
-                size="icon" 
-                className="h-9 w-9 shrink-0" 
-                onClick={handlePostComment} 
-                disabled={isSendingComment || (!newCommentText.trim() && !newCommentPhoto)}
+
+              <Button
+                size="icon"
+                className="h-9 w-9 shrink-0"
+                onClick={handlePostComment}
+                disabled={
+                  isSendingComment ||
+                  (!newCommentText.trim() && !newCommentPhoto)
+                }
               >
                 <Send className="h-4 w-4" />
               </Button>
@@ -967,7 +1056,6 @@ export default function Home() {
           </div>
         </DialogContent>
       </Dialog>
-
     </div>
   );
 }
