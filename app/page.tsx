@@ -124,7 +124,9 @@ export default function Home() {
   const [userPhoto, setUserPhoto] = useState<string | null>(null);
   const [mapCenter, setMapCenter] = useState<number[] | undefined>(undefined);
 
-  // Tickets and user data
+  // User data and tickets State
+  const [userName, setUserName] = useState<string>("");
+  const [userRole, setUserRole] = useState<string>("citizen");
   const [userHomeLocation, setUserHomeLocation] = useState<{
     latitude: number;
     longitude: number;
@@ -159,14 +161,13 @@ export default function Home() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  // Comments States
+  // Comments State
   const [viewingTicketForComments, setViewingTicketForComments] =
     useState<Ticket | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
   const [newCommentText, setNewCommentText] = useState("");
   const [newCommentPhoto, setNewCommentPhoto] = useState<File | null>(null);
   const [isSendingComment, setIsSendingComment] = useState(false);
-  const [userName, setUserName] = useState<string>("");
 
   // If user signs out, reset tab to All to avoid gated views
   useEffect(() => {
@@ -183,6 +184,9 @@ export default function Home() {
 
           if (userDoc.exists()) {
             const data = userDoc.data();
+            if (data.role) {
+              setUserRole(data.role);
+            }
             if (data.photoUrl) {
               setUserPhoto(data.photoUrl);
             }
@@ -558,6 +562,17 @@ export default function Home() {
             </Button>
           </div>
         </div>
+
+        {/* Admin Dashboard */}
+        {userRole === 'admin' && (
+          <div className="px-4 pt-4">
+            <Link href="/admin">
+              <Button variant="destructive" className="w-full gap-2 font-bold shadow-sm">
+                Admin Dashboard
+              </Button>
+            </Link>
+          </div>
+        )}
 
         {/* Feed Controls */}
         <div className="p-4 space-y-4 shrink-0">

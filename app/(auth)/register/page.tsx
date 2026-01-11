@@ -77,18 +77,24 @@ export default function RegisterPage() {
       );
       const user = userCredential.user;
 
+      let assignedRole = "citizen";
+
+      if (inviteCode.trim() === "admin") {
+        assignedRole = "admin";
+      }
+
       const userRef = doc(db, "users", user.uid);
       await setDoc(userRef, {
         uid: user.uid,
         email: email,
         displayName: displayName || email.split("@")[0],
         photoUrl: "",
-        role: "citizen",
+        role: assignedRole,
         homeCity: { name: "", latitude: 0, longitude: 0 },
         createdAt: new Date(),
       });
 
-      if (inviteCode.trim()) {
+      if (inviteCode.trim() && assignedRole !== "admin") {
         try {
           const response = await fetch(
             `https://us-central1-${process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID}.cloudfunctions.net/validateInvite`,

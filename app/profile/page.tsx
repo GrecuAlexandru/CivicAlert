@@ -181,8 +181,8 @@ export default function ProfilePage() {
                   {profile.displayName || "No name set"}
                 </p>
                 <p className="text-muted-foreground">{profile.email}</p>
-                <Badge variant={getRoleBadgeVariant(role)} className="mt-2">
-                  {role.charAt(0).toUpperCase() + role.slice(1)}
+                <Badge variant={getRoleBadgeVariant(profile.role)} className="mt-2">
+                  {profile.role.charAt(0).toUpperCase() + profile.role.slice(1)}
                 </Badge>
               </div>
             </div>
