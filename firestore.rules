@@ -46,6 +46,14 @@ service cloud.firestore {
       allow delete: if request.auth != null && request.auth.uid == resource.data.recipientId;
     }
     
+    // Reports collection - for content moderation
+    match /reports/{reportId} {
+      allow read: if request.auth != null && (isAdmin() || resource.data.reporterId == request.auth.uid);
+      allow create: if request.auth != null && request.resource.data.reporterId == request.auth.uid;
+      allow update: if request.auth != null && isAdmin();
+      allow delete: if request.auth != null && isAdmin();
+    }
+    
     // Default: deny all other access
     match /{document=**} {
       allow read, write: if false;

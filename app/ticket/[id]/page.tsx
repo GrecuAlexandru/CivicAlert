@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect, useState } from "react";
+import { useRef, useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   doc,
@@ -10,11 +10,14 @@ import {
   serverTimestamp,
   query,
   orderBy,
-  onSnapshot,
   Timestamp,
   updateDoc,
   arrayUnion,
   arrayRemove,
+  startAfter,
+  limit,
+  getDocs,
+  QueryDocumentSnapshot,
 } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db, storage } from "@/lib/firebase";
@@ -31,6 +34,8 @@ import {
   Heart,
   Reply,
   X,
+  Flag,
+  Check,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -42,9 +47,18 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+} from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { notifyNewComment } from "@/lib/notifications";
+import { reportComment, reportTicket } from "@/lib/reports";
+import { Label } from "@/components/ui/label";
 
 interface Comment {
   id?: string;
@@ -98,6 +112,17 @@ export default function TicketPage() {
   const [ticketAuthor, setTicketAuthor] = useState<UserProfile | null>(null);
   const [fullscreenImage, setFullscreenImage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Report state
+  const [reportModalOpen, setReportModalOpen] = useState(false);
+  const [reportingComment, setReportingComment] = useState<Comment | null>(
+    null
+  );
+  const [reportReason, setReportReason] = useState("");
+  const [isReporting, setIsReporting] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
+  const [reportType, setReportType] = useState<"comment" | "ticket">("comment");
+  const [reportSuccessOpen, setReportSuccessOpen] = useState(false);
 
   // Fetch expanded user profile (for photoUrl)
   useEffect(() => {
@@ -157,29 +182,65 @@ export default function TicketPage() {
     }
   }, [ticket?.userId]);
 
-  // Subscribe to comments
-  useEffect(() => {
-    if (!params?.id) return;
+  // Pagination state
+  const [lastVisible, setLastVisible] = useState<QueryDocumentSnapshot | null>(
+    null
+  );
+  const [loadingComments, setLoadingComments] = useState(false);
+  const [hasMoreComments, setHasMoreComments] = useState(true);
+  const COMMENTS_PER_PAGE = 5;
 
-    const q = query(
-      collection(db, "tickets", params.id as string, "comments"),
-      orderBy("createdAt", "desc")
-    );
+  const fetchComments = useCallback(
+    async (isInitial = false, lastDoc: QueryDocumentSnapshot | null = null) => {
+      if (!params?.id) return;
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setComments(
-        snapshot.docs.map(
+      setLoadingComments(true);
+      try {
+        let q = query(
+          collection(db, "tickets", params.id as string, "comments"),
+          orderBy("createdAt", "desc"),
+          limit(COMMENTS_PER_PAGE)
+        );
+
+        if (!isInitial && lastDoc) {
+          q = query(
+            collection(db, "tickets", params.id as string, "comments"),
+            orderBy("createdAt", "desc"),
+            startAfter(lastDoc),
+            limit(COMMENTS_PER_PAGE)
+          );
+        }
+
+        const snapshot = await getDocs(q);
+
+        const fetchedComments = snapshot.docs.map(
           (doc) =>
             ({
               id: doc.id,
               ...doc.data(),
             } as Comment)
-        )
-      );
-    });
+        );
 
-    return () => unsubscribe();
-  }, [params?.id]);
+        setLastVisible(snapshot.docs[snapshot.docs.length - 1]);
+        setHasMoreComments(snapshot.docs.length === COMMENTS_PER_PAGE);
+
+        if (isInitial) {
+          setComments(fetchedComments);
+        } else {
+          setComments((prev) => [...prev, ...fetchedComments]);
+        }
+      } catch (error) {
+        console.error("Error fetching comments:", error);
+      } finally {
+        setLoadingComments(false);
+      }
+    },
+    [params?.id]
+  );
+
+  useEffect(() => {
+    fetchComments(true);
+  }, [fetchComments]);
 
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
@@ -239,16 +300,34 @@ export default function TicketPage() {
         );
       }
 
-      await addDoc(collection(db, "tickets", params.id as string, "comments"), {
+      const newCommentRef = await addDoc(
+        collection(db, "tickets", params.id as string, "comments"),
+        {
+          userId: user.uid,
+          userName:
+            user.displayName || user.email?.split("@")[0] || "Anonymous",
+          userAvatar: userProfile?.photoUrl || user.photoURL,
+          text: commentText,
+          imageUrl: uploadedImageUrls.length > 0 ? uploadedImageUrls[0] : null, // Backward compatibility
+          imageUrls: uploadedImageUrls,
+          createdAt: serverTimestamp(),
+          likes: [],
+        }
+      );
+
+      // Manually add to state for immediate feedback
+      const newComment: Comment = {
+        id: newCommentRef.id,
         userId: user.uid,
         userName: user.displayName || user.email?.split("@")[0] || "Anonymous",
-        userAvatar: userProfile?.photoUrl || user.photoURL,
+        userAvatar: userProfile?.photoUrl || user.photoURL || undefined,
         text: commentText,
-        imageUrl: uploadedImageUrls.length > 0 ? uploadedImageUrls[0] : null, // Backward compatibility
+        imageUrl: uploadedImageUrls.length > 0 ? uploadedImageUrls[0] : null,
         imageUrls: uploadedImageUrls,
-        createdAt: serverTimestamp(),
+        createdAt: Timestamp.now(), // Estimate for UI
         likes: [],
-      });
+      };
+      setComments((prev) => [newComment, ...prev]);
 
       // Notify ticket owner about the new comment
       if (ticket && ticket.userId !== user.uid) {
@@ -328,6 +407,74 @@ export default function TicketPage() {
     // Focus textarea? If ref was available.
     const textarea = document.querySelector("textarea");
     if (textarea) textarea.focus();
+  };
+
+  const openReportModal = (comment?: Comment) => {
+    if (comment) {
+      setReportingComment(comment);
+      setReportType("comment");
+    } else {
+      setReportType("ticket");
+    }
+    setReportReason("");
+    setReportError(null);
+    setReportModalOpen(true);
+  };
+
+  const handleSubmitReport = async () => {
+    if (!user || !ticket || !reportReason.trim()) {
+      setReportError("Please provide a reason for your report.");
+      return;
+    }
+
+    if (reportType === "comment" && !reportingComment) {
+      setReportError("No comment selected for reporting.");
+      return;
+    }
+
+    setIsReporting(true);
+    setReportError(null);
+
+    try {
+      const reporterName =
+        user.displayName || user.email?.split("@")[0] || "Anonymous";
+
+      if (reportType === "comment" && reportingComment) {
+        await reportComment({
+          reporterId: user.uid,
+          reporterName,
+          ticketId: ticket.id,
+          commentId: reportingComment.id || "",
+          commentText: reportingComment.text,
+          commentAuthorId: reportingComment.userId || "",
+          commentAuthorName: reportingComment.userName,
+          reason: reportReason,
+        });
+      } else {
+        await reportTicket({
+          reporterId: user.uid,
+          reporterName,
+          ticketId: ticket.id,
+          ticketTitle: ticket.title,
+          ticketDescription: ticket.description,
+          ticketAuthorId: ticket.userId,
+          reason: reportReason,
+        });
+      }
+
+      setReportModalOpen(false);
+      setReportingComment(null);
+      setReportReason("");
+      setReportSuccessOpen(true);
+    } catch (err) {
+      if (err instanceof Error) {
+        setReportError(err.message);
+      } else {
+        setReportError("Failed to submit report. Please try again.");
+      }
+    } finally {
+      setIsReporting(false);
+    }
   };
 
   if (loading) {
@@ -446,6 +593,13 @@ export default function TicketPage() {
               </span>
             </div>
           </CardContent>
+          <div className="flex justify-center py-4">
+            <img
+              src="/CivicAlertLogo.svg"
+              alt="CivicAlert Logo"
+              className="w-24 h-24"
+            />
+          </div>
 
           <Separator />
 
@@ -492,6 +646,17 @@ export default function TicketPage() {
               <Share2 className="h-4 w-4" />
               <span className="text-xs font-medium">Share</span>
             </Button>
+            {user && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="gap-2 text-muted-foreground hover:text-destructive"
+                onClick={() => openReportModal()}
+              >
+                <Flag className="h-4 w-4" />
+                <span className="text-xs font-medium">Report</span>
+              </Button>
+            )}
           </CardFooter>
         </Card>
 
@@ -613,12 +778,26 @@ export default function TicketPage() {
                 currentUserId={user?.uid}
                 onLike={() => handleCommentLike(comment)}
                 onReply={() => handleReply(comment.userName)}
+                onReport={() => openReportModal(comment)}
                 userAvatar={comment.userAvatar}
+                onImageClick={(url) => setFullscreenImage(url)}
               />
             ))}
             {comments.length === 0 && (
               <div className="text-center text-muted-foreground py-8">
                 No comments yet. Be the first to share your thoughts!
+              </div>
+            )}
+
+            {hasMoreComments && comments.length > 0 && (
+              <div className="flex justify-center pb-8 pt-4">
+                <Button
+                  variant="outline"
+                  onClick={() => fetchComments(false, lastVisible)}
+                  disabled={loadingComments}
+                >
+                  {loadingComments ? "Loading..." : "Load More Comments"}
+                </Button>
               </div>
             )}
           </div>
@@ -651,6 +830,104 @@ export default function TicketPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Report Dialog */}
+      <Dialog open={reportModalOpen} onOpenChange={setReportModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Flag className="h-5 w-5 text-destructive" />
+              Report {reportType === "comment" ? "Comment" : "Ticket"}
+            </DialogTitle>
+            <DialogDescription>
+              Help us keep the community safe. Please explain why you&apos;re
+              reporting this {reportType}.
+            </DialogDescription>
+          </DialogHeader>
+
+          {reportType === "comment" && reportingComment && (
+            <div className="my-2 p-3 bg-muted/50 rounded-lg border">
+              <p className="text-sm text-muted-foreground mb-1">
+                Reported comment:
+              </p>
+              <p className="text-sm italic">
+                &ldquo;{reportingComment.text}&rdquo;
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                by {reportingComment.userName}
+              </p>
+            </div>
+          )}
+
+          {reportType === "ticket" && ticket && (
+            <div className="my-2 p-3 bg-muted/50 rounded-lg border">
+              <p className="text-sm text-muted-foreground mb-1">
+                Reported ticket:
+              </p>
+              <p className="text-sm font-medium">
+                {ticket.title || "Untitled Ticket"}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Owner: {ticketAuthor?.displayName || "Unknown User"}
+              </p>
+            </div>
+          )}
+
+          <div className="space-y-2">
+            <Label htmlFor="report-reason">Reason for report</Label>
+            <Textarea
+              id="report-reason"
+              placeholder={`Why should this ${reportType} be removed? e.g., Spam, offensive content...`}
+              value={reportReason}
+              onChange={(e) => setReportReason(e.target.value)}
+              className="min-h-[100px]"
+            />
+          </div>
+
+          {reportError && (
+            <p className="text-sm text-destructive">{reportError}</p>
+          )}
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setReportModalOpen(false);
+                setReportingComment(null);
+              }}
+              disabled={isReporting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleSubmitReport}
+              disabled={isReporting || !reportReason.trim()}
+            >
+              {isReporting ? "Submitting..." : "Submit Report"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Report Success Dialog */}
+      <Dialog open={reportSuccessOpen} onOpenChange={setReportSuccessOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Check className="h-5 w-5 text-green-500" />
+              Report Submitted
+            </DialogTitle>
+            <DialogDescription>
+              Thank you for helping keep our community safe. An admin will
+              review your report shortly.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button onClick={() => setReportSuccessOpen(false)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -668,6 +945,8 @@ interface CommentItemProps {
   userAvatar?: string;
   onLike?: () => void;
   onReply?: () => void;
+  onReport?: () => void;
+  onImageClick?: (url: string) => void;
 }
 
 function CommentItem({
@@ -683,6 +962,8 @@ function CommentItem({
   userAvatar,
   onLike,
   onReply,
+  onReport,
+  onImageClick,
 }: CommentItemProps) {
   // Combine single legacy image with new array if needed, or prefer array
   const displayImages =
@@ -718,7 +999,8 @@ function CommentItem({
               {displayImages.map((url, idx) => (
                 <div
                   key={idx}
-                  className="rounded-md overflow-hidden aspect-4/3 bg-muted relative border"
+                  className="rounded-md overflow-hidden aspect-4/3 bg-muted relative border cursor-pointer hover:opacity-90 transition-opacity"
+                  onClick={() => onImageClick?.(url)}
                 >
                   <img
                     src={url}
@@ -747,12 +1029,20 @@ function CommentItem({
               {likes}
             </button>
             {currentUserId && (
-              <button
-                onClick={onReply}
-                className="text-xs font-medium text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
-              >
-                <Reply className="h-3 w-3" /> Reply
-              </button>
+              <>
+                <button
+                  onClick={onReply}
+                  className="text-xs font-medium text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
+                >
+                  <Reply className="h-3 w-3" /> Reply
+                </button>
+                <button
+                  onClick={onReport}
+                  className="text-xs font-medium text-muted-foreground hover:text-destructive flex items-center gap-1 transition-colors ml-auto"
+                >
+                  <Flag className="h-3 w-3" /> Report
+                </button>
+              </>
             )}
           </div>
         </div>

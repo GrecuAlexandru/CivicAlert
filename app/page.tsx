@@ -37,7 +37,6 @@ import {
   Search,
   MapPin,
   ThumbsUp,
-  ThumbsDown,
   MessageSquare,
   Menu,
   X,
@@ -45,6 +44,7 @@ import {
   Camera,
   ImageIcon,
   Send,
+  Flame,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -60,6 +60,7 @@ import {
   arrayUnion,
   arrayRemove,
   Timestamp,
+  increment,
 } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db, storage } from "@/lib/firebase";
@@ -81,6 +82,7 @@ interface Ticket {
   imageUrls: string[];
   likes: string[];
   dislikes: string[];
+  commentCount?: number;
   createdAt: Timestamp;
 }
 
@@ -168,6 +170,9 @@ export default function Home() {
   const [newCommentText, setNewCommentText] = useState("");
   const [newCommentPhoto, setNewCommentPhoto] = useState<File | null>(null);
   const [isSendingComment, setIsSendingComment] = useState(false);
+
+  const [showHeatmap, setShowHeatmap] = useState(false);
+  const [visibleTicketsCount, setVisibleTicketsCount] = useState(20);
 
   // If user signs out, reset tab to All to avoid gated views
   useEffect(() => {
@@ -342,6 +347,20 @@ export default function Home() {
 
       setNewCommentText("");
       setNewCommentPhoto(null);
+
+      // Update comment count on ticket locally and in DB
+      const ticketRef = doc(db, "tickets", viewingTicketForComments.id);
+      await updateDoc(ticketRef, {
+        commentCount: increment(1),
+      });
+
+      setTickets((prev) =>
+        prev.map((t) =>
+          t.id === viewingTicketForComments.id
+            ? { ...t, commentCount: (t.commentCount || 0) + 1 }
+            : t
+        )
+      );
     } catch (error) {
       console.error("Error posting comment:", error);
     } finally {
@@ -435,6 +454,7 @@ export default function Home() {
 
       await addDoc(collection(db, "tickets"), {
         userId: user.uid,
+        title, // Save the actual title from form
         category,
         description,
         status: "pending",
@@ -497,6 +517,11 @@ export default function Home() {
   };
 
   const filteredTickets = getFilteredTickets();
+  const displayedTickets = filteredTickets.slice(0, visibleTicketsCount);
+
+  useEffect(() => {
+    setVisibleTicketsCount(20);
+  }, [activeTab, selectedCategory]);
 
   const toggleCategory = (cat: string) => {
     if (selectedCategory === cat) setSelectedCategory(null);
@@ -529,8 +554,8 @@ export default function Home() {
         {/* Header */}
         <div className="p-4 border-b flex items-center justify-between bg-card shrink-0">
           <div className="flex items-center gap-2">
-            <div className="h-8 w-8 bg-primary rounded-lg flex items-center justify-center">
-              <MapPin className="h-5 w-5 text-primary-foreground" />
+            <div className="h-8 w-8 flex items-center justify-center">
+              <img src="/CivicAlertLogo.svg" alt="Logo" className="h-8 w-8" />
             </div>
             <h1 className="text-xl font-bold text-foreground">CivicAlert</h1>
           </div>
@@ -564,10 +589,13 @@ export default function Home() {
         </div>
 
         {/* Admin Dashboard */}
-        {userRole === 'admin' && (
+        {userRole === "admin" && (
           <div className="px-4 pt-4">
             <Link href="/admin">
-              <Button variant="destructive" className="w-full gap-2 font-bold shadow-sm">
+              <Button
+                variant="destructive"
+                className="w-full gap-2 font-bold shadow-sm"
+              >
                 Admin Dashboard
               </Button>
             </Link>
@@ -653,7 +681,7 @@ export default function Home() {
               <p>No tickets found.</p>
             </div>
           ) : (
-            filteredTickets.map((ticket) => (
+            displayedTickets.map((ticket) => (
               <Card
                 key={ticket.id}
                 onClick={() => handleTicketClick(ticket)}
@@ -721,7 +749,8 @@ export default function Home() {
                         }}
                         className="flex items-center gap-1 hover:text-blue-500 transition-colors"
                       >
-                        <MessageSquare className="h-3 w-3" /> Comments
+                        <MessageSquare className="h-3 w-3" />{" "}
+                        {ticket.commentCount || 0} Comments
                       </button>
                     </div>
 
@@ -735,6 +764,17 @@ export default function Home() {
                 </CardContent>
               </Card>
             ))
+          )}
+          {visibleTicketsCount < filteredTickets.length && (
+            <div className="pt-2 text-center">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setVisibleTicketsCount((prev) => prev + 20)}
+              >
+                Load More
+              </Button>
+            </div>
           )}
         </div>
 
@@ -760,8 +800,8 @@ export default function Home() {
 
       {/* Map Area */}
       <main className="flex-1 relative h-full w-full">
-        {/* Toggle Button */}
-        <div className="absolute top-4 left-4 z-10">
+        {/* Toggle Buttons */}
+        <div className="absolute top-4 left-4 z-10 flex gap-2">
           <Button
             variant="secondary"
             size="icon"
@@ -773,6 +813,19 @@ export default function Home() {
             ) : (
               <Menu className="h-5 w-5" />
             )}
+          </Button>
+          <Button
+            variant={showHeatmap ? "default" : "secondary"}
+            size="icon"
+            className={`shadow-md backdrop-blur-sm ${
+              showHeatmap
+                ? "bg-orange-500 hover:bg-orange-600"
+                : "bg-background/90 hover:bg-background"
+            }`}
+            onClick={() => setShowHeatmap(!showHeatmap)}
+            title={showHeatmap ? "Hide Heatmap" : "Show Heatmap"}
+          >
+            <Flame className={`h-5 w-5 ${showHeatmap ? "text-white" : ""}`} />
           </Button>
         </div>
 
@@ -806,6 +859,7 @@ export default function Home() {
             tickets={tickets}
             userHomeLocation={userHomeLocation}
             selectedTicketId={selectedTicket?.id}
+            showHeatmap={showHeatmap}
           />
         </div>
       </main>

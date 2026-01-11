@@ -18,6 +18,7 @@ interface ArcgisMapProps {
   tickets?: Ticket[];
   userHomeLocation?: { latitude: number; longitude: number } | null;
   selectedTicketId?: string | null;
+  showHeatmap?: boolean;
 }
 
 if (process.env.NEXT_PUBLIC_ARCGIS_API_KEY) {
@@ -32,6 +33,7 @@ export default function ArcgisMap({
   tickets = [],
   userHomeLocation,
   selectedTicketId,
+  showHeatmap = false,
 }: ArcgisMapProps) {
   const mapRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<MapView | null>(null);
@@ -40,6 +42,8 @@ export default function ArcgisMap({
   const ticketsRef = useRef(tickets);
   const userHomeLocationRef = useRef(userHomeLocation);
   const graphicsLayerRef = useRef<GraphicsLayer | null>(null);
+  const heatmapLayerRef = useRef<__esri.FeatureLayer | null>(null);
+  const showHeatmapRef = useRef(showHeatmap);
   const router = useRouter();
 
   // Highlight fix: Ref to track hovered item
@@ -51,6 +55,7 @@ export default function ArcgisMap({
     isSelectingRef.current = isSelecting;
     ticketsRef.current = tickets;
     userHomeLocationRef.current = userHomeLocation;
+    showHeatmapRef.current = showHeatmap;
 
     if (viewRef.current && viewRef.current.container) {
       viewRef.current.container.style.cursor = isSelecting
@@ -62,7 +67,19 @@ export default function ArcgisMap({
     if (viewRef.current && graphicsLayerRef.current) {
       updateGraphics(graphicsLayerRef.current);
     }
-  }, [onLocationSelect, isSelecting, tickets, userHomeLocation]);
+
+    // Toggle layer visibility based on heatmap mode
+    if (graphicsLayerRef.current) {
+      graphicsLayerRef.current.visible = !showHeatmap;
+    }
+    if (heatmapLayerRef.current) {
+      heatmapLayerRef.current.visible = showHeatmap;
+      // Update heatmap data when toggled on
+      if (showHeatmap) {
+        updateHeatmapLayer();
+      }
+    }
+  }, [onLocationSelect, isSelecting, tickets, userHomeLocation, showHeatmap]);
 
   // Handle auto-popup when selectedTicketId changes
   useEffect(() => {
@@ -159,6 +176,51 @@ export default function ArcgisMap({
     });
   };
 
+  const updateHeatmapLayer = async () => {
+    if (!heatmapLayerRef.current || !viewRef.current) return;
+
+    const layer = heatmapLayerRef.current;
+
+    // Dynamically import Graphic if needed, but we already use it elsewhere.
+    // Ensuring it is imported.
+    const Graphic = (await import("@arcgis/core/Graphic")).default;
+
+    try {
+      // Query all existing features to delete
+      const query = layer.createQuery();
+      query.where = "1=1";
+      const results = await layer.queryFeatures(query);
+      const existingFeatures = results.features;
+
+      // Create new graphics
+      const newGraphics = ticketsRef.current.map(
+        (ticket, index) =>
+          new Graphic({
+            geometry: {
+              type: "point",
+              longitude: ticket.location.longitude,
+              latitude: ticket.location.latitude,
+            } as __esri.Point,
+            attributes: {
+              // Using a simple index-based ID.
+              // In a real app, you might want persistent IDs if you update individual items.
+              ObjectID: index + 1,
+              category: ticket.category,
+              weight: 1,
+            },
+          })
+      );
+
+      // Apply edits: delete all existing, add new ones
+      await layer.applyEdits({
+        deleteFeatures: existingFeatures,
+        addFeatures: newGraphics,
+      });
+    } catch (error) {
+      console.error("Failed to update heatmap layer:", error);
+    }
+  };
+
   // Update view center when center prop changes
   useEffect(() => {
     if (viewRef.current && viewRef.current.ready && center) {
@@ -239,6 +301,68 @@ export default function ArcgisMap({
       const graphicsLayer = new GraphicsLayer();
       map.add(graphicsLayer);
       graphicsLayerRef.current = graphicsLayer;
+
+      // Create heatmap layer with HeatmapRenderer
+      const [FeatureLayer, HeatmapRenderer] = await Promise.all([
+        import("@arcgis/core/layers/FeatureLayer"),
+        import("@arcgis/core/renderers/HeatmapRenderer"),
+      ]);
+
+      // Create initial features for heatmap
+      const heatmapFeatures = ticketsRef.current.map(
+        (ticket, index) =>
+          new Graphic({
+            geometry: {
+              type: "point",
+              longitude: ticket.location.longitude,
+              latitude: ticket.location.latitude,
+            } as __esri.Point,
+            attributes: {
+              ObjectID: index,
+              category: ticket.category,
+              weight: 1,
+            },
+          })
+      );
+
+      const heatmapLayer = new FeatureLayer.default({
+        source: heatmapFeatures,
+        objectIdField: "ObjectID",
+        geometryType: "point",
+        spatialReference: { wkid: 4326 },
+        fields: [
+          { name: "ObjectID", type: "oid" },
+          { name: "category", type: "string" },
+          { name: "weight", type: "double" },
+        ],
+        renderer: new HeatmapRenderer.default({
+          colorStops: [
+            { color: "rgba(63, 40, 102, 0)", ratio: 0 },
+            { color: "#472b77", ratio: 0.083 },
+            { color: "#4e2d87", ratio: 0.166 },
+            { color: "#563098", ratio: 0.249 },
+            { color: "#5d32a8", ratio: 0.332 },
+            { color: "#6735be", ratio: 0.415 },
+            { color: "#7139d4", ratio: 0.498 },
+            { color: "#7b3ce9", ratio: 0.581 },
+            { color: "#853fff", ratio: 0.664 },
+            { color: "#a46fbf", ratio: 0.747 },
+            { color: "#c29f80", ratio: 0.83 },
+            { color: "#e0cf40", ratio: 0.913 },
+            { color: "#ffff00", ratio: 1 },
+          ],
+          radius: 18,
+          minDensity: 0,
+          maxDensity: 0.04625,
+        }),
+        visible: showHeatmapRef.current,
+      });
+
+      map.add(heatmapLayer);
+      heatmapLayerRef.current = heatmapLayer;
+
+      // Set initial visibility based on showHeatmap prop
+      graphicsLayer.visible = !showHeatmapRef.current;
 
       // Initial graphics draw
       updateGraphics(graphicsLayer);

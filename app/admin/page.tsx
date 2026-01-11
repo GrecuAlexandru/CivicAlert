@@ -3,28 +3,31 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
-import { 
-  collection, 
-  query, 
-  orderBy, 
-  onSnapshot, 
-  doc, 
-  updateDoc, 
-  deleteDoc, 
-  getDoc 
+import {
+  collection,
+  query,
+  orderBy,
+  onSnapshot,
+  doc,
+  updateDoc,
+  deleteDoc,
+  getDoc,
+  Timestamp,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { 
-  CheckCircle, 
-  XCircle, 
-  Trash2, 
-  ArrowLeft, 
+import {
+  CheckCircle,
+  XCircle,
+  Trash2,
+  ArrowLeft,
   CheckCheck,
-  AlertCircle
+  AlertCircle,
+  Flag,
 } from "lucide-react";
+import Link from "next/link";
 
 interface Ticket {
   id: string;
@@ -34,7 +37,7 @@ interface Ticket {
   status: string;
   category: string;
   imageUrls: string[];
-  createdAt: any;
+  createdAt: Timestamp;
 }
 
 export default function AdminDashboard() {
@@ -91,7 +94,7 @@ export default function AdminDashboard() {
     try {
       await updateDoc(doc(db, "tickets", ticketId), {
         status: newStatus,
-        updatedAt: new Date()
+        updatedAt: new Date(),
       });
     } catch (error) {
       console.error("Error updating ticket status:", error);
@@ -112,16 +115,25 @@ export default function AdminDashboard() {
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case "pending": return "bg-yellow-500/10 text-yellow-600 border-yellow-200";
-      case "approved": return "bg-blue-500/10 text-blue-600 border-blue-200";
-      case "resolved": return "bg-green-500/10 text-green-600 border-green-200";
-      case "rejected": return "bg-red-500/10 text-red-600 border-red-200";
-      default: return "bg-gray-100 text-gray-600";
+      case "pending":
+        return "bg-yellow-500/10 text-yellow-600 border-yellow-200";
+      case "approved":
+        return "bg-blue-500/10 text-blue-600 border-blue-200";
+      case "resolved":
+        return "bg-green-500/10 text-green-600 border-green-200";
+      case "rejected":
+        return "bg-red-500/10 text-red-600 border-red-200";
+      default:
+        return "bg-gray-100 text-gray-600";
     }
   };
 
   if (loading || checkingRole) {
-    return <div className="flex h-screen items-center justify-center">Checking permissions...</div>;
+    return (
+      <div className="flex h-screen items-center justify-center">
+        Checking permissions...
+      </div>
+    );
   }
 
   if (!isAdmin) return null;
@@ -132,14 +144,39 @@ export default function AdminDashboard() {
         {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <Button variant="outline" size="icon" onClick={() => router.push("/")}>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => router.push("/")}
+            >
               <ArrowLeft className="h-4 w-4" />
             </Button>
-            <h1 className="text-3xl font-bold tracking-tight">Admin Dashboard</h1>
+            <h1 className="text-3xl font-bold tracking-tight">
+              Admin Dashboard
+            </h1>
           </div>
           <div className="text-sm text-muted-foreground">
             Number of Tickets: {tickets.length}
           </div>
+        </div>
+
+        {/* Navigation Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Link href="/admin/moderation">
+            <Card className="p-6 hover:shadow-lg transition-shadow cursor-pointer border-2 border-destructive/20 hover:border-destructive/40">
+              <div className="flex items-center gap-4">
+                <div className="h-12 w-12 rounded-full bg-destructive/10 flex items-center justify-center">
+                  <Flag className="h-6 w-6 text-destructive" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-lg">Moderation Panel</h3>
+                  <p className="text-sm text-muted-foreground">
+                    Review reported comments and images
+                  </p>
+                </div>
+              </div>
+            </Card>
+          </Link>
         </div>
 
         {/* List with tickets */}
@@ -147,13 +184,12 @@ export default function AdminDashboard() {
           {tickets.map((ticket) => (
             <Card key={ticket.id} className="overflow-hidden">
               <div className="flex flex-col md:flex-row">
-                
                 {/* Image(if it exists) */}
                 {ticket.imageUrls && ticket.imageUrls.length > 0 && (
                   <div className="w-full md:w-48 h-32 md:h-auto bg-muted shrink-0">
-                    <img 
-                      src={ticket.imageUrls[0]} 
-                      alt="Ticket" 
+                    <img
+                      src={ticket.imageUrls[0]}
+                      alt="Ticket"
                       className="w-full h-full object-cover"
                     />
                   </div>
@@ -163,10 +199,19 @@ export default function AdminDashboard() {
                   <div>
                     <div className="flex justify-between items-start mb-2">
                       <div>
-                        <Badge variant="outline" className="mb-2">{ticket.category}</Badge>
-                        <h3 className="font-bold text-lg">{ticket.title || "Fără titlu"}</h3>
+                        <Badge variant="outline" className="mb-2">
+                          {ticket.category}
+                        </Badge>
+                        <h3 className="font-bold text-lg">
+                          {ticket.title || "Fără titlu"}
+                        </h3>
                       </div>
-                      <Badge className={`capitalize ${getStatusColor(ticket.status)}`} variant="outline">
+                      <Badge
+                        className={`capitalize ${getStatusColor(
+                          ticket.status
+                        )}`}
+                        variant="outline"
+                      >
                         {ticket.status}
                       </Badge>
                     </div>
@@ -174,46 +219,55 @@ export default function AdminDashboard() {
                       {ticket.description}
                     </p>
                     <div className="text-xs text-muted-foreground mt-2">
-                      Created at: {ticket.createdAt?.toDate ? ticket.createdAt.toDate().toLocaleString() : "N/A"}
+                      Created at:{" "}
+                      {ticket.createdAt?.toDate
+                        ? ticket.createdAt.toDate().toLocaleString()
+                        : "N/A"}
                     </div>
                   </div>
 
                   <div className="flex flex-wrap gap-2 pt-4 border-t mt-2">
-                    
                     {/* Buttons for status change */}
-                    {ticket.status === 'pending' && (
+                    {ticket.status === "pending" && (
                       <>
-                        <Button 
-                          size="sm" 
-                          className="bg-blue-600 hover:bg-blue-700" 
-                          onClick={() => handleStatusChange(ticket.id, "approved")}
+                        <Button
+                          size="sm"
+                          className="bg-blue-600 hover:bg-blue-700"
+                          onClick={() =>
+                            handleStatusChange(ticket.id, "approved")
+                          }
                         >
                           <CheckCircle className="h-4 w-4 mr-2" /> Accept
                         </Button>
-                        <Button 
-                          size="sm" 
+                        <Button
+                          size="sm"
                           variant="destructive"
-                          onClick={() => handleStatusChange(ticket.id, "rejected")}
+                          onClick={() =>
+                            handleStatusChange(ticket.id, "rejected")
+                          }
                         >
                           <XCircle className="h-4 w-4 mr-2" /> Reject
                         </Button>
                       </>
                     )}
 
-                    {ticket.status === 'approved' && (
-                      <Button 
-                        size="sm" 
+                    {ticket.status === "approved" && (
+                      <Button
+                        size="sm"
                         className="bg-green-600 hover:bg-green-700"
-                        onClick={() => handleStatusChange(ticket.id, "resolved")}
+                        onClick={() =>
+                          handleStatusChange(ticket.id, "resolved")
+                        }
                       >
                         <CheckCheck className="h-4 w-4 mr-2" /> Mark as Resolved
                       </Button>
                     )}
 
                     {/* Button for status reset */}
-                    {(ticket.status === 'resolved' || ticket.status === 'rejected') && (
-                      <Button 
-                        size="sm" 
+                    {(ticket.status === "resolved" ||
+                      ticket.status === "rejected") && (
+                      <Button
+                        size="sm"
                         variant="outline"
                         onClick={() => handleStatusChange(ticket.id, "pending")}
                       >
@@ -223,9 +277,9 @@ export default function AdminDashboard() {
 
                     {/* Delete Button */}
                     <div className="ml-auto">
-                      <Button 
-                        size="sm" 
-                        variant="ghost" 
+                      <Button
+                        size="sm"
+                        variant="ghost"
                         className="text-red-600 hover:text-red-700 hover:bg-red-50"
                         onClick={() => handleDeleteTicket(ticket.id)}
                       >
