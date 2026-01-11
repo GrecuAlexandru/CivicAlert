@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, use } from "react";
 import MapWrapper from "@/app/map/map-wrapper";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -37,12 +37,14 @@ import {
   Search,
   MapPin,
   ThumbsUp,
+  ThumbsDown,
   MessageSquare,
   Menu,
   X,
   ArrowUpDown,
   Camera,
   ImageIcon,
+  Send
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -56,6 +58,8 @@ import {
   orderBy,
   onSnapshot,
   GeoPoint,
+  arrayUnion,
+  arrayRemove
 } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db, storage } from "@/lib/firebase";
@@ -73,7 +77,18 @@ interface Ticket {
     longitude: number;
   };
   imageUrls: string[];
-  votes: string[];
+  likes: string[];
+  dislikes: string[];
+  createdAt: any;
+}
+
+interface Comment {
+  id: string;
+  userId: string;
+  userName?: string;
+  userAvatar?: string;
+  text: string;
+  imageUrl?: string;
   createdAt: any;
 }
 
@@ -142,6 +157,14 @@ export default function Home() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
+  // Comments States
+  const [viewingTicketForComments, setViewingTicketForComments] = useState<Ticket | null>(null);
+  const [comments, setComments] = useState<Comment[]>([]);
+  const [newCommentText, setNewCommentText] = useState("");
+  const [newCommentPhoto, setNewCommentPhoto] = useState<File | null>(null);
+  const [isSendingComment, setIsSendingComment] = useState(false);
+  const [userName, setUserName] = useState<string>("");
+
   // If user signs out, reset tab to All to avoid gated views
   useEffect(() => {
     if (!user && activeTab !== "all") {
@@ -154,6 +177,7 @@ export default function Home() {
       const fetchUserData = async () => {
         try {
           const userDoc = await getDoc(doc(db, "users", user.uid));
+
           if (userDoc.exists()) {
             const data = userDoc.data();
             if (data.photoUrl) {
@@ -185,6 +209,16 @@ export default function Home() {
               });
             }
           }
+
+          // Try to get the name of the user to use when sending comments
+          let userName = ""
+
+          if (!userName && user.email) {
+            userName = user.email.split('@')[0];
+          }
+
+          setUserName(userName || "User");
+
         } catch (error) {
           console.error("Error fetching user data:", error);
         }
@@ -205,6 +239,75 @@ export default function Home() {
     });
     return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (viewingTicketForComments) {
+      const q = query(collection(db, "tickets", viewingTicketForComments.id, "comments"), orderBy("createdAt", "asc"));
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        const fetchedComments = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Comment[];
+        setComments(fetchedComments);
+      });
+      return () => unsubscribe();
+    } else {
+      setComments([]);
+    }
+  }, [viewingTicketForComments]);
+
+  const handleVote = async (e: React.MouseEvent, ticket: Ticket, type: 'like' | 'dislike') => {
+    e.stopPropagation(); 
+    if (!user) return;
+
+    const ticketRef = doc(db, "tickets", ticket.id);
+    const uid = user.uid;
+
+    try {
+      if (type === 'like') {
+        if (ticket.likes?.includes(uid)) {
+          await updateDoc(ticketRef, { likes: arrayRemove(uid) });
+        } else {
+          await updateDoc(ticketRef, { likes: arrayUnion(uid), dislikes: arrayRemove(uid) });
+        }
+      } else {
+        if (ticket.dislikes?.includes(uid)) {
+          await updateDoc(ticketRef, { dislikes: arrayRemove(uid) });
+        } else {
+          await updateDoc(ticketRef, { dislikes: arrayUnion(uid), likes: arrayRemove(uid) });
+        }
+      }
+    } catch (err) {
+      console.error("Error voting:", err);
+    }
+  };
+
+  const handlePostComment = async () => {
+    if (!user || !viewingTicketForComments || (!newCommentText && !newCommentPhoto)) return;
+    
+    setIsSendingComment(true);
+    try {
+      let imageUrl = null;
+      if (newCommentPhoto) {
+        const imageRef = ref(storage, `comment-images/${uuidv4()}`);
+        await uploadBytes(imageRef, newCommentPhoto);
+        imageUrl = await getDownloadURL(imageRef);
+      }
+
+      await addDoc(collection(db, "tickets", viewingTicketForComments.id, "comments"), {
+        userId: user.uid,
+        userName: userName || user.email?.split('@')[0] || "Anonymous",
+        userAvatar: userPhoto || user.photoURL,
+        text: newCommentText,
+        imageUrl: imageUrl,
+        createdAt: serverTimestamp()
+      });
+
+      setNewCommentText("");
+      setNewCommentPhoto(null);
+    } catch (error) {
+      console.error("Error posting comment:", error);
+    } finally {
+      setIsSendingComment(false);
+    }
+  };
 
   const handleStartReporting = () => {
     setIsReporting(true);
@@ -523,16 +626,29 @@ export default function Home() {
                     </p>
                   </div>
 
-                  <div className="flex items-center justify-between pt-2 border-t mt-2">
-                    <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                      <div className="flex items-center gap-1 hover:text-primary transition-colors">
-                        <ThumbsUp className="h-3 w-3" /> {ticket.votes?.length || 0}
-                      </div>
-                      <div className="flex items-center gap-1 hover:text-primary transition-colors">
-                        <MessageSquare className="h-3 w-3" /> 0
-                      </div>
+                  <div className="flex items-center justify-between pt-2 border-t mt-1">
+                    <div className="flex items-center gap-3 text-xs text-muted-foreground">                      
+                      <button 
+                        onClick={(e) => handleVote(e, ticket, 'like')} 
+                        className={`flex items-center gap-1 hover:text-green-600 transition-colors ${ticket.likes?.includes(user?.uid || "") ? "text-green-600 font-bold" : ""}`}
+                      >
+                        <ThumbsUp className="h-3 w-3" /> {ticket.likes?.length || 0}
+                      </button>
+                      <button 
+                        onClick={(e) => handleVote(e, ticket, 'dislike')} 
+                        className={`flex items-center gap-1 hover:text-red-600 transition-colors ${ticket.dislikes?.includes(user?.uid || "") ? "text-red-600 font-bold" : ""}`}
+                      >
+                        <ThumbsDown className="h-3 w-3 mt-0.5" /> {ticket.dislikes?.length || 0}
+                      </button>
+                      <button 
+                        onClick={(e) => { e.stopPropagation(); setViewingTicketForComments(ticket); }} 
+                        className="flex items-center gap-1 hover:text-blue-500 transition-colors"
+                      >
+                        <MessageSquare className="h-3 w-3" /> Comments
+                      </button>
                     </div>
-                    <Badge variant="outline" className="text-xs font-normal">
+                    
+                    <Badge variant="outline" className="text-[10px] font-normal px-1 py-0">
                       {ticket.status}
                     </Badge>
                   </div>
@@ -753,6 +869,105 @@ export default function Home() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Comments Modal */}
+      <Dialog open={!!viewingTicketForComments} onOpenChange={(open) => !open && setViewingTicketForComments(null)}>
+        <DialogContent className="sm:max-w-[500px] h-[80vh] flex flex-col p-0 gap-0 overflow-hidden">
+          <div className="p-4 border-b shrink-0 bg-background z-10">
+            <DialogHeader>
+              <DialogTitle className="text-lg">{viewingTicketForComments?.title || "Incident Details"}</DialogTitle>
+              <DialogDescription className="text-xs line-clamp-2">
+                {viewingTicketForComments?.description}
+              </DialogDescription>
+            </DialogHeader>
+          </div>
+          
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-muted/10">
+            {comments.length === 0 ? (
+              <p className="text-center text-xs text-muted-foreground py-4">No comments yet.</p>
+            ) : (
+              comments.map((c) => (
+                <div key={c.id} className="flex gap-2">
+                  <Avatar className="h-6 w-6 mt-1">
+                    <AvatarImage src={c.userAvatar} />
+                    <AvatarFallback>{c.userName?.charAt(0).toUpperCase()}</AvatarFallback>
+                  </Avatar>
+                  <div className="bg-card border rounded-md p-2 shadow-sm text-sm flex-1">
+                    <div className="flex justify-between items-center mb-1">
+                      <span className="font-semibold text-xs">{c.userName}</span>
+                      <span className="text-[10px] text-muted-foreground">
+                        {c.createdAt?.toDate ? c.createdAt.toDate().toLocaleString() : ""}
+                      </span>
+                    </div>
+                    <p className="text-xs">{c.text}</p>
+                    {c.imageUrl && (
+                      <img 
+                        src={c.imageUrl} 
+                        alt="Attachment" 
+                        className="mt-2 rounded-md max-h-32 border object-cover" 
+                      />
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div className="p-3 bg-card border-t mt-auto flex flex-col gap-2">
+            {newCommentPhoto && (
+              <div className="flex items-center gap-2 p-2 bg-muted rounded-md text-xs w-fit">
+                <ImageIcon className="h-3 w-3" />
+                <span className="truncate max-w-[150px]">{newCommentPhoto.name}</span>
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="h-4 w-4 ml-1 hover:bg-destructive/20" 
+                  onClick={() => setNewCommentPhoto(null)}
+                >
+                  <X className="h-3 w-3" />
+                </Button>
+              </div>
+            )}
+            
+            <div className="flex gap-2 items-center">
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="shrink-0"
+                onClick={() => document.getElementById("comment-photo-input")?.click()}
+              >
+                <Camera className="h-4 w-4" />
+              </Button>
+              <Input 
+                id="comment-photo-input" 
+                type="file" 
+                accept="image/*" 
+                className="hidden" 
+                onChange={(e) => e.target.files?.[0] && setNewCommentPhoto(e.target.files[0])} 
+              />
+              
+              <Input 
+                className="h-9 text-sm" 
+                placeholder="Write a comment..." 
+                value={newCommentText} 
+                onChange={(e) => setNewCommentText(e.target.value)} 
+                onKeyDown={(e) => e.key === 'Enter' && handlePostComment()} 
+                disabled={isSendingComment}
+              />
+              
+              <Button 
+                size="icon" 
+                className="h-9 w-9 shrink-0" 
+                onClick={handlePostComment} 
+                disabled={isSendingComment || (!newCommentText.trim() && !newCommentPhoto)}
+              >
+                <Send className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
     </div>
   );
 }
