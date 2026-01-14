@@ -532,18 +532,36 @@ export default function TicketPage() {
               <span className="font-semibold text-sm">
                 {ticketAuthor?.displayName || "Anonymous User"}
               </span>
-              <span className="text-xs text-muted-foreground">
-                {ticket.createdAt?.toDate
-                  ? ticket.createdAt.toDate().toLocaleString([], {
-                      year: "numeric",
-                      month: "short",
-                      day: "numeric",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })
-                  : "Just now"}{" "}
-                • {ticket.category}
-              </span>
+              <div className="flex items-center gap-2 mt-0.5">
+                <span className="text-xs text-muted-foreground">
+                  {ticket.createdAt?.toDate
+                    ? ticket.createdAt.toDate().toLocaleString([], {
+                        year: "numeric",
+                        month: "short",
+                        day: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })
+                    : "Just now"}{" "}
+                  • {ticket.category}
+                </span>
+                <Badge
+                  variant="outline"
+                  className={`h-5 px-1.5 text-[10px] uppercase border ${
+                    (ticket.status || "pending").toLowerCase() === "resolved"
+                      ? "bg-green-500/15 text-green-700 border-green-200 hover:bg-green-500/25"
+                      : (ticket.status || "pending").toLowerCase() ===
+                        "approved"
+                      ? "bg-blue-500/15 text-blue-700 border-blue-200 hover:bg-blue-500/25"
+                      : (ticket.status || "pending").toLowerCase() ===
+                        "rejected"
+                      ? "bg-red-500/15 text-red-700 border-red-200 hover:bg-red-500/25"
+                      : "bg-yellow-500/15 text-yellow-700 border-yellow-200 hover:bg-yellow-500/25"
+                  }`}
+                >
+                  {ticket.status || "Pending"}
+                </Badge>
+              </div>
             </div>
             {/* <Button variant="ghost" size="icon" className="ml-auto">
               <MoreHorizontal className="h-4 w-4" />
@@ -593,14 +611,6 @@ export default function TicketPage() {
               </span>
             </div>
           </CardContent>
-          <div className="flex justify-center py-4">
-            <img
-              src="/CivicAlertLogo.svg"
-              alt="CivicAlert Logo"
-              className="w-24 h-24"
-            />
-          </div>
-
           <Separator />
 
           {/* Interaction Bar */}
@@ -808,7 +818,10 @@ export default function TicketPage() {
         open={!!fullscreenImage}
         onOpenChange={() => setFullscreenImage(null)}
       >
-        <DialogContent className="max-w-4xl w-full p-0 bg-transparent border-none shadow-none flex justify-center items-center">
+        <DialogContent
+          showCloseButton={false}
+          className="max-w-4xl w-full p-0 bg-transparent border-none shadow-none flex justify-center items-center"
+        >
           <DialogTitle className="sr-only">
             Fullscreen Evidence View
           </DialogTitle>

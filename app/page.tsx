@@ -67,6 +67,7 @@ import { db, storage } from "@/lib/firebase";
 import { v4 as uuidv4 } from "uuid";
 import { NotificationBell } from "@/components/NotificationBell";
 import { notifyNewComment } from "@/lib/notifications";
+import { TicketCommentCount } from "@/components/TicketCommentCount";
 
 interface Ticket {
   id: string;
@@ -242,10 +243,17 @@ export default function Home() {
   useEffect(() => {
     const q = query(collection(db, "tickets"), orderBy("createdAt", "desc"));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const fetchedTickets = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      })) as Ticket[];
+      const fetchedTickets = snapshot.docs.map((doc) => {
+        const data = doc.data();
+        return {
+          id: doc.id,
+          ...data,
+          // Support for both old and new schema
+          likes: data.votes || data.likes || [],
+          dislikes: data.dislikes || [],
+          commentCount: data.commentCount || 0,
+        };
+      }) as Ticket[];
       setTickets(fetchedTickets);
     });
     return () => unsubscribe();
@@ -278,28 +286,18 @@ export default function Home() {
     e.stopPropagation();
     if (!user) return;
 
+    // We only support upvotes ("like") now as per new schema
+    if (type !== "like") return;
+
     const ticketRef = doc(db, "tickets", ticket.id);
     const uid = user.uid;
 
     try {
-      if (type === "like") {
-        if (ticket.likes?.includes(uid)) {
-          await updateDoc(ticketRef, { likes: arrayRemove(uid) });
-        } else {
-          await updateDoc(ticketRef, {
-            likes: arrayUnion(uid),
-            dislikes: arrayRemove(uid),
-          });
-        }
+      // Check if user ID is in the 'votes' array (mapped to 'likes' in UI state)
+      if (ticket.likes?.includes(uid)) {
+        await updateDoc(ticketRef, { votes: arrayRemove(uid) });
       } else {
-        if (ticket.dislikes?.includes(uid)) {
-          await updateDoc(ticketRef, { dislikes: arrayRemove(uid) });
-        } else {
-          await updateDoc(ticketRef, {
-            dislikes: arrayUnion(uid),
-            likes: arrayRemove(uid),
-          });
-        }
+        await updateDoc(ticketRef, { votes: arrayUnion(uid) });
       }
     } catch (err) {
       console.error("Error voting:", err);
@@ -750,7 +748,7 @@ export default function Home() {
                         className="flex items-center gap-1 hover:text-blue-500 transition-colors"
                       >
                         <MessageSquare className="h-3 w-3" />{" "}
-                        {ticket.commentCount || 0} Comments
+                        <TicketCommentCount ticketId={ticket.id} /> Comments
                       </button>
                     </div>
 
@@ -814,19 +812,21 @@ export default function Home() {
               <Menu className="h-5 w-5" />
             )}
           </Button>
-          <Button
-            variant={showHeatmap ? "default" : "secondary"}
-            size="icon"
-            className={`shadow-md backdrop-blur-sm ${
-              showHeatmap
-                ? "bg-orange-500 hover:bg-orange-600"
-                : "bg-background/90 hover:bg-background"
-            }`}
-            onClick={() => setShowHeatmap(!showHeatmap)}
-            title={showHeatmap ? "Hide Heatmap" : "Show Heatmap"}
-          >
-            <Flame className={`h-5 w-5 ${showHeatmap ? "text-white" : ""}`} />
-          </Button>
+          {userRole === "admin" && (
+            <Button
+              variant={showHeatmap ? "default" : "secondary"}
+              size="icon"
+              className={`shadow-md backdrop-blur-sm ${
+                showHeatmap
+                  ? "bg-orange-500 hover:bg-orange-600"
+                  : "bg-background/90 hover:bg-background"
+              }`}
+              onClick={() => setShowHeatmap(!showHeatmap)}
+              title={showHeatmap ? "Hide Heatmap" : "Show Heatmap"}
+            >
+              <Flame className={`h-5 w-5 ${showHeatmap ? "text-white" : ""}`} />
+            </Button>
+          )}
         </div>
 
         {/* Reporting Overlay Instructions */}

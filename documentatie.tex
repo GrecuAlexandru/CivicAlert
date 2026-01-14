@@ -40,11 +40,11 @@
 \section{Definirea Temei}
 
 \subsection{Tema generala si obiectivele propuse}
-Proiectul propune dezvoltarea unei platforme web de tip \textit{Smart City}, destinata digitalizarii interactiunii dintre cetateni si administratia locala. Solutia se bazeaza pe trei piloni fundamentali: raportarea spatiala a incidentelor, implicarea comunitara (prin voturi si comentarii) si un sistem proactiv de notificari in timp real, care asigura transparenta totala a procesului de rezolvare.
+Proiectul propune dezvoltarea unei platforme web de tip \textit{Smart City}, destinata digitalizarii interactiunii dintre cetateni si administratia locala. Solutia se bazeaza pe trei piloni fundamentali: raportarea spatiala a incidentelor, implicarea comunitara (prin voturi si comentarii) si un sistem proactiv de notificari in timp real, care asigura transparenta totala a procesului de solutionare a problemelor.
 
 \textbf{Obiective principale:}
 \begin{itemize}
-    \item \textbf{Sistem de Notificari:} Alertarea automata a utilizatorilor la schimbarea statusului tichetelor sau la aparitia unor noutati in comunitate, mentinand utilizatorul conectat permanent.
+    \item \textbf{Sistem de Notificari:} Alertarea automata a utilizatorilor la modificarea statusului tichetelor sau la aparitia unor noutati in comunitate, mentinand utilizatorul conectat permanent.
     \item Implementarea unui sistem de \textbf{Ticketing Geospatial}: transformarea sesizarilor in tichete gestionabile direct pe harta.
     \item Vizualizarea interactiva folosind \textbf{ArcGIS API}.
     \item \textbf{Sistem de Votare (Prioritizare):} Cetatenii pot sustine sesizarile existente prin "Upvote".
@@ -141,7 +141,7 @@ Stocheaza alertele pentru utilizatori.
 
 \section{Tehnologii}
 
-Aceasta sectiune detaliaza stiva tehnologica aleasa pentru implementarea platformei CivicAlert, justificand alegerile facute in functie de cerintele de performanta, scalabilitate si functionalitatile geospatiale necesare.
+Aceasta sectiune detaliaza tehnologiile alese  pentru implementarea platformei CivicAlert, justificand alegerile facute in functie de cerintele de performanta, scalabilitate si functionalitatile geospatiale necesare.
 
 \subsection{Generale}
 Arhitectura aplicatiei este de tip \textit{Serverless} si \textit{Single Page Application (SPA)} (cu elemente de Server-Side Rendering pentru performanta initiala), bazata pe ecosistemul JavaScript/TypeScript.
@@ -261,8 +261,6 @@ Tabelul urmator detaliaza cele 9 riscuri identificate in matricea de mai sus si 
 \textbf{Risc 7} & \textbf{Depasire Cote Firebase} \newline (Probabilitate Medie / Impact Ridicat) \newline Atingerea limitelor planului gratuit (Spark) din cauza numarului mare de citiri. & Optimizarea interogarilor (paginare, limitare rezultate) si stocarea datelor statice (ex: lista orase) in cache local. \\ \hline
 
 \textbf{Risc 8} & \textbf{Expunere Chei API (Security Leak)} \newline (Probabilitate Mica / Impact Ridicat) \newline Includerea accidentala a cheilor private (ex: Firebase Service Account) in codul client-side. & Utilizarea stricta a variabilelor de mediu (`.env.local`) si asigurarea ca cheile sensibile sunt accesate doar din API Routes (server-side), nu din browser. \\ \hline
-
-\pagebreak % Optional: Fortam trecerea ultimului risc pe pagina noua daca e cazul
 
 \textbf{Risc 9} & \textbf{Intarzieri Functionalitati Complexe} \newline (Probabilitate Mare / Impact Ridicat) \newline Riscul de a nu finaliza Heatmap-ul sau Votarea la timp. & Prioritizarea modulelor critice (MVP) si simplificarea cerintelor (ex: Heatmap static in loc de dinamic) daca este necesar. \\
 \end{longtable}
