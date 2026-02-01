@@ -4,6 +4,13 @@
 
 CivicAlert is a web-based Smart City solution that bridges the gap between citizens and local administration. The platform enables citizens to report urban issues geospatially, engage with their community through voting and comments, and receive real-time notifications about issue resolutions.
 
+## Screenshots
+
+![Main Interface](images/main.png)
+![Ticket View](images/ticket.png)
+![Admin Panel](images/admin.png)
+
+
 ![Architecture](images/architecture.png)
 
 ## Features
@@ -62,9 +69,3 @@ CivicAlert is a web-based Smart City solution that bridges the gap between citiz
    ```
 
 Open [http://localhost:3000](http://localhost:3000) in your browser.
-
-## Screenshots
-
-![Main Interface](images/main.png)
-![Ticket View](images/ticket.png)
-![Admin Panel](images/admin.png)
